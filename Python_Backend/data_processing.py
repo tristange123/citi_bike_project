@@ -5,9 +5,9 @@ import json
 
 STARTTIME = dt(2019, 1, 1, tzinfo=ZoneInfo('America/New_York'))
 ENDTIME = dt(2019, 12, 31, tzinfo=ZoneInfo('America/New_York'))
-SPARCITY = 20
-INPUT_FILES = ['citi_bike_data_00000.csv']
-OUTPUT_FILE = 'test_cross_val.csv'
+SPARCITY = 1
+INPUT_FILES = ['citi_bike_data_00000.csv','citi_bike_data_00001.csv']
+OUTPUT_FILE = 'medium_crossval_set.csv'
 VALIDATION_SET = True
 
 
@@ -48,6 +48,7 @@ def read_csv(filename: str) -> pd.DataFrame:
             "station_information_last_updated": "Int64",
             "missing_station_information": "boolean"
         },
+        nrows = 1000000
     )
     # Read in timestamps as UNIX/POSIX epochs but then convert to the local
     # bike share timezone.
