@@ -3,11 +3,13 @@ from zoneinfo import ZoneInfo
 from datetime import datetime as dt
 import json
 
-STARTTIME = dt(2019, 1, 1, tzinfo=ZoneInfo('America/New_York'))
+STARTTIME = dt(2018, 1, 1, tzinfo=ZoneInfo('America/New_York'))
 ENDTIME = dt(2019, 12, 31, tzinfo=ZoneInfo('America/New_York'))
-SPARCITY = 1
-INPUT_FILES = ['citi_bike_data_00000.csv','citi_bike_data_00001.csv']
-OUTPUT_FILE = 'medium_crossval_set.csv'
+SPARCITY = 1   
+INPUT_FILES = []
+for i in range(0,50):
+    INPUT_FILES.append(f"data/citi_bike_data_{i:05d}.csv")
+OUTPUT_FILE = 'mediumset_14thstbelow.csv'
 VALIDATION_SET = True
 
 
@@ -27,7 +29,7 @@ def read_csv(filename: str) -> pd.DataFrame:
         sep=",",
         na_values="\\N",
         dtype={
-            "station_id": str,
+            "station_id": "Int64",
             # Use Pandas Int16 dtype to allow for nullable integers
             "num_bikes_available": "Int16",
             "num_ebikes_available": "Int16",
@@ -48,8 +50,8 @@ def read_csv(filename: str) -> pd.DataFrame:
             "station_information_last_updated": "Int64",
             "missing_station_information": "boolean"
         },
-        nrows = 1000000
-    )
+        nrows = 500000
+              )
     # Read in timestamps as UNIX/POSIX epochs but then convert to the local
     # bike share timezone.
     df["station_status_last_reported"] = pd.to_datetime(
@@ -65,14 +67,13 @@ def read_csv(filename: str) -> pd.DataFrame:
 def process_file(csv_file):
     df = read_csv(csv_file)
 
-    correct_ids = set()
-    for sid in df['station_id'].unique():
-        if len(sid) <= 4:
-            correct_ids.add(sid)
+    
+
+    
 
 
     mask = (
-        df['station_id'].isin(correct_ids) & 
+        df['station_id'].isin(id_to_shortname.keys()) & 
         (df['station_status_last_reported'] < ENDTIME) & 
         (df['station_status_last_reported'] > STARTTIME)
     )
@@ -82,10 +83,14 @@ def process_file(csv_file):
 
     df = df.loc[mask, cols].iloc[::SPARCITY].copy()
 
-    # Add stations with valid Legacy ID -> shortnames into the working station list
+    
+
+    df['shortname'] = df['station_id'].map(id_to_shortname)
 
     
 
+
+    # Add stations with valid Legacy ID -> shortnames into the working station list
     
     with open('valid_stations_list.json', 'r') as f:
         valid_stations_list = json.load(f)
@@ -94,17 +99,20 @@ def process_file(csv_file):
 
 
     if not VALIDATION_SET:
-        for id in df['station_id'].unique():
-            if int(id) in id_to_shortname.keys():
-                valid_stations_set.add(id)
+        for shortname in df['shortname'].unique():
+           
+            valid_stations_set.add(shortname)
         
-            else:
-                print(f"Station ID {id} not found in station information. Skipping.")
+         
 
         with open('valid_stations_list.json', 'w') as f:
             json.dump(list(valid_stations_set), f)
 
-    df = df[df['station_id'].isin(valid_stations_set)].copy()
+    
+
+    df = df[df['shortname'].isin(valid_stations_set)].copy()
+
+    print(df['shortname'].unique())
 
     return df
 
