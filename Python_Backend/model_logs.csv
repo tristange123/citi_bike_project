@@ -1,0 +1,10 @@
+model_name,train_mae,train_rmse,R^2,hyperparams,features_used,notes
+Baseline CatBoost,0.1434598168291589,0.187208537567662,0.6243217570360188,default,"NO lag features, baseline","Default parameters, seems kinda weak, ran on medium sized dataset with just sparse data from the first 2 csvs"
+Cat Boost with first before time stamp lag,0.0194267768263703,0.0443156977889176,0.9789486512173992,default,Only lag from previous measurement and time since last measurement,"Pretty good but I feel like the predictive power is limited since the lags are so close, will have to figure out better lag design"
+Standard with more data and from 2017 and 2018,0.1635937958153705,0.2100143139867084,0.5152798602624318,"default, will change to 500 iteration since conversion seems to be at around 200",Standard,uhhh i feel like more data had a very marginal improvement
+Standard with more data and from 2017 and 2018,0.2159381761589162,0.2774574358159558,0.2435754064815376,default,Standard,oops will start logging test results from now on
+"Standard using only stations in Manhatten under 14th st. Used 2017 to 2018 data with 100,000 cols per csv, used 10,000 per csv for cross val",0.2021730535651849,0.2569194519207871,0.4196163895374684,default,"Standard, added volitatity",lowkey using used stations make big difference
+"same as previous but I took out volitatiy, turned out to be bad i guess",0.2009711660224294,0.2557922600876621,0.4246978931404673,default,Standard,lowkey using used stations make big difference
+added minute feature,0.2010371925996494,0.255622936401135,0.4254592925053961,default,Standard + minute,literally no difference i guess will keep in the model
+changed max iterations to 1000,0.1974267610581173,0.2531563764665104,0.4364935288844578,default,Standard,"lowkey max iterations makes a gud difference, model is still underfitting and could be better with more"
+"used dataset with 500,000 rows by per csv",0.1731218757537587,0.2178985810645873,0.5825254834799561,default,Standard,holy shit more data actually matters so much
