@@ -9,15 +9,21 @@ import holidays
 from zoneinfo import ZoneInfo
 import pydeck as pdk
 from pathlib import Path
+import openmeteo_requests
+import os
+
+
 
 
 BASE_DIR = Path(__file__).parent
 
 STATIONS_CSV = BASE_DIR / "citibike-stations.csv"
 STATIONS_JSON = BASE_DIR / "true_valid_stations_list.json"
-MODEL_PATH = BASE_DIR / "Working_model.cbm"
+MODEL_PATH = BASE_DIR / "Weather_Model.cbm"
 
 st.set_page_config(layout="wide")
+
+os.environ["MAPBOX_API_KEY"] = "pk.eyJ1IjoidHJpczEyMyIsImEiOiJjbWx2ZXI3c2kwN3gzM2dwcHlneGQwZ2dzIn0.2RXp4Aq-QaHcR0eZ3ZFL3w"
 
 col1, col2 = st.columns([3, 1])
 with col1:
@@ -88,6 +94,85 @@ def pull_data():
     return df
 
 
+@st.cache_data(ttl=300)
+def get_forecast(lat=40.78, lon=-73.96):
+    openmeteo = openmeteo_requests.Client()
+
+    # 2. Define your parameters
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ["temperature_2m", "precipitation", "snow_depth", "wind_speed_10m"],
+        "timezone": "UTC"
+    }
+    
+    responses = openmeteo.weather_api(url, params=params)
+    res = responses[0]
+
+    hourly = res.Hourly()
+
+
+    data = pd.DataFrame({
+        "time": pd.date_range(
+            start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+            end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+            freq=pd.Timedelta(seconds=hourly.Interval()),
+            inclusive="left"
+        ),
+        "temp": hourly.Variables(0).ValuesAsNumpy(),
+        "prcp": hourly.Variables(1).ValuesAsNumpy(),
+        "snwd": hourly.Variables(2).ValuesAsNumpy(),
+        "wspd": hourly.Variables(3).ValuesAsNumpy()
+    })
+
+    return data
+
+@st.cache_data(ttl=300)
+def add_weather(df):
+    df['hour_key'] = df['timestamp'].dt.floor('h')
+
+    
+    df_weather = get_forecast()
+
+    df_weather = df_weather.fillna(0)
+
+    # time since rain feature
+    counter = 0
+    time_since_rain = []
+    for i in range(len(df_weather)):
+        if df_weather.iloc[i]['prcp'] > 0:
+            counter = 0
+        else:
+            counter += 1
+        time_since_rain.append(counter)
+
+    df_weather['time_since_rain'] = time_since_rain
+
+    # time since dry feature??
+    counter = 0
+    time_since_dry = []
+    for i in range(len(df_weather)):
+        if df_weather.iloc[i]['prcp'] > 0 or df_weather.iloc[i]['snwd'] > 0:
+            counter += 1
+        else:
+            counter = 0
+        time_since_dry.append(counter)
+
+    df_weather['time_since_dry'] = time_since_dry
+    
+
+    df_final = pd.merge(
+    df, 
+    df_weather, 
+    left_on='hour_key', 
+    right_on='time', 
+    how='left'       
+    )
+
+    return df_final
+
+
 
 def add_Xfeatures(df):
     df['Month'] = df['timestamp'].dt.month
@@ -104,7 +189,8 @@ def add_Xfeatures(df):
 
     df['IsHoliday'] = df['timestamp'].dt.date.isin(holiday_date_list).astype(int)
     df['IsNonWorkingDay'] = ((df['IsWeekend'] == 1) | (df['IsHoliday'] == 1)).astype(int)
-    
+
+    df = add_weather(df)
 
     return df
 
@@ -137,9 +223,14 @@ def get_all_predictions():
         predictions[shortname] = pred_df
 
     # make predictions
+    df_columns = ['shortname', 'Month', 'Day', 'Hour', 
+                   'IsWeekend', 'IsHoliday', 'IsNonWorkingDay', 'lat', 'lon', 'IsRushHour','minute', 
+                   'temp','prcp','snwd','wspd','time_since_rain','time_since_dry']
+
     for name, data in predictions.items():
-        x = data.drop('timestamp', axis = 1)
+        x = data[df_columns]
         data['predictions'] = model.predict(x)
+        data['predictions'] = data['predictions']
 
     curr_df = pull_data()
 
@@ -188,44 +279,107 @@ for shortname, df in predictions_dict.items():
 
 map_df = pd.DataFrame(map_data).dropna(subset=['lat', 'lon'])
 
+# if display_mode == "Bikes":
+#     map_df['display_val'] = map_df['predicted_capacity']
+#     tooltip_html = "<b>{name}</b><br/>Predicted Bike Availability: {predicted_capacity}"
+#     point_color = [200, 30, 0, 160] # Red for bikes
+#     df_col = 'predicted_capacity'
+#     df_label = 'Predicted Bike Availability'
+# else:
+#     map_df['display_val'] = map_df['predicted_dock_capacity']
+#     tooltip_html = "<b>{name}</b><br/>Predicted Dock Availability: {predicted_dock_capacity}"
+#     point_color = [30, 100, 200, 160] # Blue for docks
+#     df_col = 'predicted_dock_capacity'
+#     df_label = 'Predicted Dock Availability'
+
+# map_df['radius'] = map_df['display_val'] * 70 + 25
+
+# st.pydeck_chart(pdk.Deck(
+#     map_style='mapbox://styles/mapbox/streets-v11',
+#     initial_view_state=pdk.ViewState(
+#         latitude=map_df["lat"].mean(),
+#         longitude=map_df["lon"].mean(),
+#         zoom=12,
+#         pitch=50,
+#     ),
+#     layers=[
+#         pdk.Layer(
+#             "ScatterplotLayer",
+#             data=map_df,
+#             get_position="[lon, lat]",
+#             get_color=point_color,
+#             get_radius="radius", # Base size + capacity scaling
+#             pickable=True,
+#         ),
+#     ],
+#     tooltip={"html": tooltip_html}
+# ))
+
+# st.write("Current time:", datetime.now(ZoneInfo("US/Eastern")).strftime("%A, %B %d, %Y %I:%M %p"))
+# st.write(f"Showing predictions for: {selected_time.strftime('%A, %B %d, %Y %I:%M %p')}")
+
+# # Display a table with the data
+# st.dataframe(map_df[['name', df_col]].rename(columns={'name': 'Station Name', df_col: df_label}).sort_values('Station Name').set_index('Station Name'))
+
 if display_mode == "Bikes":
     map_df['display_val'] = map_df['predicted_capacity']
-    tooltip_html = "<b>{name}</b><br/>Predicted Bike Availability: {predicted_capacity:.0%}"
-    point_color = [200, 30, 0, 160] # Red for bikes
+    tooltip_html = "<b>{name}</b><br/>Predicted Bike Availability: {predicted_capacity}"
+    point_color = [200, 30, 0, 160]  # Red
     df_col = 'predicted_capacity'
     df_label = 'Predicted Bike Availability'
 else:
     map_df['display_val'] = map_df['predicted_dock_capacity']
-    tooltip_html = "<b>{name}</b><br/>Predicted Dock Availability: {predicted_dock_capacity:.0%}"
-    point_color = [30, 100, 200, 160] # Blue for docks
+    tooltip_html = "<b>{name}</b><br/>Predicted Dock Availability: {predicted_dock_capacity}"
+    point_color = [30, 100, 200, 160]  # Blue
     df_col = 'predicted_dock_capacity'
     df_label = 'Predicted Dock Availability'
 
+# --- Radius Scaling ---
 map_df['radius'] = map_df['display_val'] * 70 + 25
 
-st.pydeck_chart(pdk.Deck(
-    map_style='mapbox://styles/mapbox/streets-v11',
-    initial_view_state=pdk.ViewState(
-        latitude=map_df["lat"].mean(),
-        longitude=map_df["lon"].mean(),
-        zoom=12,
-        pitch=50,
-    ),
-    layers=[
-        pdk.Layer(
-            "ScatterplotLayer",
-            data=map_df,
-            get_position="[lon, lat]",
-            get_color=point_color,
-            get_radius="radius", # Base size + capacity scaling
-            pickable=True,
-        ),
-    ],
-    tooltip={"html": tooltip_html}
-))
+# --- Always Center on NYC (fallback if empty) ---
+if len(map_df) > 0:
+    center_lat = map_df["lat"].mean()
+    center_lon = map_df["lon"].mean()
+else:
+    # Manhattan fallback
+    center_lat = 40.73
+    center_lon = -73.98
 
+# --- Create Layer ---
+scatter_layer = pdk.Layer(
+    "ScatterplotLayer",
+    data=map_df,
+    get_position="[lon, lat]",
+    get_color=point_color,
+    get_radius="radius",
+    pickable=True,
+)
+
+# --- Create Deck ---
+deck = pdk.Deck(
+    map_style="mapbox://styles/mapbox/light-v9",
+    initial_view_state=pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=12,
+        pitch=45,
+    ),
+    layers=[scatter_layer],
+    tooltip={"html": tooltip_html},
+)
+
+# --- Render Map ---
+st.pydeck_chart(deck)
+
+# --- Time Display ---
 st.write("Current time:", datetime.now(ZoneInfo("US/Eastern")).strftime("%A, %B %d, %Y %I:%M %p"))
 st.write(f"Showing predictions for: {selected_time.strftime('%A, %B %d, %Y %I:%M %p')}")
 
-# Display a table with the data
-st.dataframe(map_df[['name', df_col]].rename(columns={'name': 'Station Name', df_col: df_label}).sort_values('Station Name').set_index('Station Name'))
+# --- Table ---
+st.dataframe(
+    map_df[['name', df_col]]
+    .rename(columns={'name': 'Station Name', df_col: df_label})
+    .sort_values('Station Name')
+    .set_index('Station Name')
+)
