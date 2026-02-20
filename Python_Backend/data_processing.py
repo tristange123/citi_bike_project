@@ -3,17 +3,14 @@ from zoneinfo import ZoneInfo
 from datetime import datetime as dt
 import json
 
-STARTTIME = dt(2018, 1, 1, tzinfo=ZoneInfo('America/New_York'))
+STARTTIME = dt(2019, 1, 1, tzinfo=ZoneInfo('America/New_York'))
 ENDTIME = dt(2019, 12, 31, tzinfo=ZoneInfo('America/New_York'))
 SPARCITY = 1   
 INPUT_FILES = []
 for i in range(0,50):
     INPUT_FILES.append(f"data/citi_bike_data_{i:05d}.csv")
-OUTPUT_FILE = 'mediumset_14thstbelow.csv'
+OUTPUT_FILE = 'smallvalset_14thstbelow.csv'
 VALIDATION_SET = True
-
-
-
 
 stations_df = pd.read_csv('citibike-stations.csv')
 
@@ -29,7 +26,7 @@ def read_csv(filename: str) -> pd.DataFrame:
         sep=",",
         na_values="\\N",
         dtype={
-            "station_id": "Int64",
+            "station_id": str,
             # Use Pandas Int16 dtype to allow for nullable integers
             "num_bikes_available": "Int16",
             "num_ebikes_available": "Int16",
@@ -49,8 +46,9 @@ def read_csv(filename: str) -> pd.DataFrame:
             "has_kiosk": "boolean",
             "station_information_last_updated": "Int64",
             "missing_station_information": "boolean"
-        },
-        nrows = 500000
+        }, 
+        nrows = 10000
+
               )
     # Read in timestamps as UNIX/POSIX epochs but then convert to the local
     # bike share timezone.
@@ -67,11 +65,12 @@ def read_csv(filename: str) -> pd.DataFrame:
 def process_file(csv_file):
     df = read_csv(csv_file)
 
+    valid_pos_ints_mask = df['station_id'].astype(str).str.isdigit()
+
+    df = df[valid_pos_ints_mask].copy()
+
+    df['station_id'] = df['station_id'].astype('int64')
     
-
-    
-
-
     mask = (
         df['station_id'].isin(id_to_shortname.keys()) & 
         (df['station_status_last_reported'] < ENDTIME) & 

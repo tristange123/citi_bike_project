@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from catboost import CatBoostRegressor
 import json
 import requests
@@ -18,7 +18,12 @@ STATIONS_JSON = BASE_DIR / "true_valid_stations_list.json"
 MODEL_PATH = BASE_DIR / "Working_model.cbm"
 
 st.set_page_config(layout="wide")
-st.title("🚲 Station Capacity Forecast")
+
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("🚲 Station Capacity Forecast")
+with col2:
+    display_mode = st.radio("Display Mode:", ["Bikes", "Docks"], horizontal=True)
 
 # Load station metadata
 @st.cache_data
@@ -85,7 +90,6 @@ def pull_data():
 
 
 def add_Xfeatures(df):
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc = True)
     df['Month'] = df['timestamp'].dt.month
     df['Day'] = df['timestamp'].dt.dayofweek
     df['Hour'] = df['timestamp'].dt.hour
@@ -110,7 +114,7 @@ def add_Xfeatures(df):
 @st.cache_data(ttl=600) # Cache predictions for 10 minutes
 def get_all_predictions():
 
-    curr = datetime.now(ZoneInfo("US/Eastern"))
+    curr = datetime.now(tz = ZoneInfo('UTC'))
     end = curr + timedelta(days = 7)
 
 
@@ -147,11 +151,11 @@ def get_all_predictions():
 
     for name, data in predictions.items():
         data['initial_offset'] = data.loc[0, 'predictions'] - curr_capacities[name]
-        data['updated_predictions'] = data['predictions'] - (data['initial_offset'] * np.clip((1 - ((data['timestamp'] - datetime.now(ZoneInfo("US/Eastern"))).dt.total_seconds() / 86400)), 0, 1))
+        data['updated_predictions'] = data['predictions'] - (data['initial_offset'] * np.clip((1 - ((data['timestamp'] - datetime.now(ZoneInfo("UTC"))).dt.total_seconds() / 86400)), 0, 1))
         data['updated_predictions'] = data['updated_predictions'].clip(lower = 0, upper = 1)
 
+    timestamps = [x.astimezone(ZoneInfo("America/New_York")) for x in timestamps]
 
-                
     return predictions, timestamps
 
 
@@ -179,13 +183,28 @@ for shortname, df in predictions_dict.items():
             'lon': shortname_to_lon.get(shortname),
             'name': shortname_to_name.get(shortname, shortname),
             'predicted_capacity': capacity,
+            'predicted_dock_capacity': 1 - capacity
         })
 
 map_df = pd.DataFrame(map_data).dropna(subset=['lat', 'lon'])
 
+if display_mode == "Bikes":
+    map_df['display_val'] = map_df['predicted_capacity']
+    tooltip_html = "<b>{name}</b><br/>Predicted Bike Availability: {predicted_capacity:.0%}"
+    point_color = [200, 30, 0, 160] # Red for bikes
+    df_col = 'predicted_capacity'
+    df_label = 'Predicted Bike Availability'
+else:
+    map_df['display_val'] = map_df['predicted_dock_capacity']
+    tooltip_html = "<b>{name}</b><br/>Predicted Dock Availability: {predicted_dock_capacity:.0%}"
+    point_color = [30, 100, 200, 160] # Blue for docks
+    df_col = 'predicted_dock_capacity'
+    df_label = 'Predicted Dock Availability'
+
+map_df['radius'] = map_df['display_val'] * 70 + 25
 
 st.pydeck_chart(pdk.Deck(
-    map_style='mapbox://styles/mapbox/light-v9',
+    map_style='mapbox://styles/mapbox/streets-v11',
     initial_view_state=pdk.ViewState(
         latitude=map_df["lat"].mean(),
         longitude=map_df["lon"].mean(),
@@ -197,16 +216,16 @@ st.pydeck_chart(pdk.Deck(
             "ScatterplotLayer",
             data=map_df,
             get_position="[lon, lat]",
-            get_color='[200, 30, 0, 160]',
-            get_radius="predicted_capacity * 75 + 10", # Base size + capacity scaling
+            get_color=point_color,
+            get_radius="radius", # Base size + capacity scaling
             pickable=True,
         ),
     ],
-    tooltip={"html": "<b>{name}</b><br/>Predicted Availability: {predicted_capacity:.0%}"}
+    tooltip={"html": tooltip_html}
 ))
 
 st.write("Current time:", datetime.now(ZoneInfo("US/Eastern")).strftime("%A, %B %d, %Y %I:%M %p"))
 st.write(f"Showing predictions for: {selected_time.strftime('%A, %B %d, %Y %I:%M %p')}")
 
 # Display a table with the data
-st.dataframe(map_df[['name', 'predicted_capacity']].rename(columns={'name': 'Station Name', 'predicted_capacity': 'Predicted Availability'}).sort_values('Station Name').set_index('Station Name'))
+st.dataframe(map_df[['name', df_col]].rename(columns={'name': 'Station Name', df_col: df_label}).sort_values('Station Name').set_index('Station Name'))
