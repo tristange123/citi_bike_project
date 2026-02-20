@@ -8,4 +8,11 @@ Standard with more data and from 2017 and 2018,0.2159381761589162,0.277457435815
 added minute feature,0.2010371925996494,0.255622936401135,0.4254592925053961,default,Standard + minute,literally no difference i guess will keep in the model
 changed max iterations to 1000,0.1974267610581173,0.2531563764665104,0.4364935288844578,default,Standard,"lowkey max iterations makes a gud difference, model is still underfitting and could be better with more"
 "used dataset with 500,000 rows by per csv",0.1731218757537587,0.2178985810645873,0.5825254834799561,default,Standard,holy shit more data actually matters so much
-"upgraded to 1,500 iterations",0.1694259858895991,0.21420016242331583,0.5965769042498335,default,Standard,"still underfit but gains were minial, 10  minutes to train"
+"upgraded to 1,500 iterations",0.1694259858895991,0.2142001624233158,0.5965769042498335,default,Standard,"still underfit but gains were minial, 10  minutes to train"
+"add weather, medium dataset",0.1373407387327732,0.1749422249212864,0.7175412301823882,default,weather!!,"weather made a difference, there is data leakage due to not using forecasts but still"
+"added time since rain, medium dataset",0.1351106366196488,0.1723118053636154,0.7259714343351453,default,weather + time since rain,"didnt do muich, might need more iteratinoss or learning rate to see progress"
+learning to 0.7,0.1320598581822363,0.1704364705105446,0.7319036902224427,"still 1500 iterations, 0.7 learning rate",weather + time since rain + time since dry,the model is still not converging somehow
+learning to 1,0.1343098779289666,0.1728648155582158,0.7242097005517453,"still 1500 iterations, 1 learning rate",weather + time since rain + time since dry,the model converged slower?? 0.7 might the best will try increasing iterations again
+2500 iter,0.1221788440400161,0.1585317136897429,0.7680480218474588,"2500 iterations, 0.7 learning rate",weather + time since rain + time since dry,still hasnt converged???
+"3500 iter, 7 tree depth??",0.1021592171879682,0.1345483291150527,0.8329207989587692,"3500 iterations, 0.7 learning, 7 depth",weather + time since rain + time since dry,wow depth might need to be higher
+"3500 iter, 9 tree depth??",0.07605818659775701,0.10309212045457075,0.9019118107914889,"3500 iterations, 0.7 learning, 9 depth",weather + time since rain + time since dry,"tree depth might still need to be higher, satified with this for now since training takes so long"

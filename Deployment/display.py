@@ -279,47 +279,6 @@ for shortname, df in predictions_dict.items():
 
 map_df = pd.DataFrame(map_data).dropna(subset=['lat', 'lon'])
 
-# if display_mode == "Bikes":
-#     map_df['display_val'] = map_df['predicted_capacity']
-#     tooltip_html = "<b>{name}</b><br/>Predicted Bike Availability: {predicted_capacity}"
-#     point_color = [200, 30, 0, 160] # Red for bikes
-#     df_col = 'predicted_capacity'
-#     df_label = 'Predicted Bike Availability'
-# else:
-#     map_df['display_val'] = map_df['predicted_dock_capacity']
-#     tooltip_html = "<b>{name}</b><br/>Predicted Dock Availability: {predicted_dock_capacity}"
-#     point_color = [30, 100, 200, 160] # Blue for docks
-#     df_col = 'predicted_dock_capacity'
-#     df_label = 'Predicted Dock Availability'
-
-# map_df['radius'] = map_df['display_val'] * 70 + 25
-
-# st.pydeck_chart(pdk.Deck(
-#     map_style='mapbox://styles/mapbox/streets-v11',
-#     initial_view_state=pdk.ViewState(
-#         latitude=map_df["lat"].mean(),
-#         longitude=map_df["lon"].mean(),
-#         zoom=12,
-#         pitch=50,
-#     ),
-#     layers=[
-#         pdk.Layer(
-#             "ScatterplotLayer",
-#             data=map_df,
-#             get_position="[lon, lat]",
-#             get_color=point_color,
-#             get_radius="radius", # Base size + capacity scaling
-#             pickable=True,
-#         ),
-#     ],
-#     tooltip={"html": tooltip_html}
-# ))
-
-# st.write("Current time:", datetime.now(ZoneInfo("US/Eastern")).strftime("%A, %B %d, %Y %I:%M %p"))
-# st.write(f"Showing predictions for: {selected_time.strftime('%A, %B %d, %Y %I:%M %p')}")
-
-# # Display a table with the data
-# st.dataframe(map_df[['name', df_col]].rename(columns={'name': 'Station Name', df_col: df_label}).sort_values('Station Name').set_index('Station Name'))
 
 if display_mode == "Bikes":
     map_df['display_val'] = map_df['predicted_capacity']
