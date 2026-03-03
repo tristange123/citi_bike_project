@@ -7,12 +7,12 @@ STARTTIME = dt(2019, 1, 1, tzinfo=ZoneInfo('America/New_York'))
 ENDTIME = dt(2019, 12, 31, tzinfo=ZoneInfo('America/New_York'))
 SPARCITY = 1   
 INPUT_FILES = []
-for i in range(0,50):
-    INPUT_FILES.append(f"data/citi_bike_data_{i:05d}.csv")
-OUTPUT_FILE = 'smallvalset_14thstbelow.csv'
+for i in range(0,4):
+    INPUT_FILES.append(f"All_Data/Raw_Data/citi_bike_data_{i:05d}.csv")
+OUTPUT_FILE = 'All_Data/Cleaned/few_2019_dense.parquet'
 VALIDATION_SET = True
 
-stations_df = pd.read_csv('citibike-stations.csv')
+stations_df = pd.read_csv('All_Data/Station_Info/citibike-stations.csv')
 
 id_to_shortname = dict(zip(stations_df['station_id'], stations_df['short_name']))
 
@@ -26,7 +26,7 @@ def read_csv(filename: str) -> pd.DataFrame:
         sep=",",
         na_values="\\N",
         dtype={
-            "station_id": str,
+            "station_id": "string",
             # Use Pandas Int16 dtype to allow for nullable integers
             "num_bikes_available": "Int16",
             "num_ebikes_available": "Int16",
@@ -37,28 +37,27 @@ def read_csv(filename: str) -> pd.DataFrame:
             "is_renting": "Int16",
             "is_returning": "Int16",
             "station_status_last_reported": "Int64",
-            "station_name": str,
+            "station_name": "string",
             "lat": float,
             "lon": float,
-            "region_id": str,
+            "region_id": "string",
             "capacity": "Int16",
             # Use pandas boolean dtype to allow for nullable booleans
             "has_kiosk": "boolean",
             "station_information_last_updated": "Int64",
             "missing_station_information": "boolean"
-        }, 
-        nrows = 10000
+        }
 
               )
     # Read in timestamps as UNIX/POSIX epochs but then convert to the local
     # bike share timezone.
     df["station_status_last_reported"] = pd.to_datetime(
         df["station_status_last_reported"], unit="s", origin="unix", utc=True
-    ).dt.tz_convert("America/New_York")
+    )
 
     df["station_information_last_updated"] = pd.to_datetime(
         df["station_information_last_updated"], unit="s", origin="unix", utc=True
-    ).dt.tz_convert("America/New_York")
+    )
 
     return df
 
@@ -91,7 +90,7 @@ def process_file(csv_file):
 
     # Add stations with valid Legacy ID -> shortnames into the working station list
     
-    with open('valid_stations_list.json', 'r') as f:
+    with open('All_Data/Station_Info/valid_stations_list.json', 'r') as f:
         valid_stations_list = json.load(f)
     
     valid_stations_set = set(valid_stations_list)
@@ -104,7 +103,7 @@ def process_file(csv_file):
         
          
 
-        with open('valid_stations_list.json', 'w') as f:
+        with open('All_Data/Station_Info/valid_stations_list.json', 'w') as f:
             json.dump(list(valid_stations_set), f)
 
     
@@ -124,4 +123,11 @@ for file in INPUT_FILES:
 
 final_df = pd.concat(dataframes, ignore_index=True)
 
-final_df.to_csv(OUTPUT_FILE, index=False)
+# final_df.to_csv(OUTPUT_FILE, index=False)
+
+final_df.to_parquet(
+    OUTPUT_FILE,
+    engine="pyarrow",
+    index=False,        
+    compression="snappy"  
+)
