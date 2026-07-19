@@ -1,0 +1,7 @@
+catboost
+fastapi
+holidays
+numpy
+pandas
+requests
+uvicorn[standard]
