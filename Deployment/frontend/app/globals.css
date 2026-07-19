@@ -158,20 +158,21 @@ h2 {
   width: 100%;
 }
 
-.map-fallback {
-  align-items: center;
-  color: var(--muted);
-  display: flex;
-  justify-content: center;
-  padding: 32px;
-  text-align: center;
-}
-
 .station-marker {
-  border: 2px solid #ffffff;
-  border-radius: 999px;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
   cursor: pointer;
+}
+
+.leaflet-container {
+  font: inherit;
+  height: 100%;
+  width: 100%;
+}
+
+.leaflet-popup-content {
+  color: var(--text);
+  line-height: 1.45;
+  margin: 12px 14px;
 }
 
 .table-card {

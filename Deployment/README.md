@@ -43,4 +43,4 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_MAPBOX_TOKEN` in `.env.local` to render the interactive map.
+The map uses Leaflet with OpenStreetMap tiles, so no map API token is required.

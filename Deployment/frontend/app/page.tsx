@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import mapboxgl from "mapbox-gl";
+import type { LayerGroup, Map as LeafletMap } from "leaflet";
 
 type DisplayMode = "bikes" | "docks";
 
@@ -33,7 +33,6 @@ const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:80
   /\/$/,
   "",
 );
-const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -60,10 +59,11 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("bikes");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isMapReady, setIsMapReady] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markerLayerRef = useRef<LayerGroup | null>(null);
 
   useEffect(() => {
     async function loadPredictions() {
@@ -102,64 +102,101 @@ export default function Home() {
   }, [data, selectedIndex, displayMode]);
 
   useEffect(() => {
-    if (!mapboxToken || !mapContainerRef.current || mapRef.current) {
+    if (isLoading || error || !mapContainerRef.current || mapRef.current) {
       return;
     }
 
-    mapboxgl.accessToken = mapboxToken;
-    mapRef.current = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: "mapbox://styles/mapbox/light-v11",
-      center: [-73.98, 40.73],
-      zoom: 12,
-      pitch: 35,
-    });
-    mapRef.current.addControl(new mapboxgl.NavigationControl(), "top-right");
+    let isMounted = true;
+
+    async function initializeMap() {
+      const L = await import("leaflet");
+      if (!isMounted || !mapContainerRef.current || mapRef.current) {
+        return;
+      }
+
+      const map = L.map(mapContainerRef.current, {
+        center: [40.73, -73.98],
+        scrollWheelZoom: true,
+        zoom: 12,
+      });
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(map);
+
+      markerLayerRef.current = L.layerGroup().addTo(map);
+      mapRef.current = map;
+      setIsMapReady(true);
+
+      requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+    }
+
+    initializeMap();
 
     return () => {
+      isMounted = false;
+      setIsMapReady(false);
       mapRef.current?.remove();
       mapRef.current = null;
+      markerLayerRef.current = null;
     };
-  }, []);
+  }, [error, isLoading]);
 
   useEffect(() => {
-    if (!data || !mapRef.current) {
+    if (!data || !isMapReady || !mapRef.current || !markerLayerRef.current) {
       return;
     }
 
-    markersRef.current.forEach((marker) => marker.remove());
-    markersRef.current = [];
+    const predictionData = data;
 
-    const bounds = new mapboxgl.LngLatBounds();
-    const color = displayMode === "bikes" ? "rgba(200, 30, 0, 0.72)" : "rgba(30, 100, 200, 0.72)";
+    async function renderMarkers() {
+      const L = await import("leaflet");
+      if (!mapRef.current || !markerLayerRef.current) {
+        return;
+      }
 
-    data.stations.forEach((station) => {
-      const availability = getAvailability(station, selectedIndex, displayMode);
-      const markerElement = document.createElement("div");
-      markerElement.className = "station-marker";
-      markerElement.style.width = `${availability * 44 + 14}px`;
-      markerElement.style.height = `${availability * 44 + 14}px`;
-      markerElement.style.background = color;
+      markerLayerRef.current.clearLayers();
 
-      const popup = new mapboxgl.Popup({ offset: 16 }).setHTML(
-        `<strong>${station.name}</strong><br/>${displayMode === "bikes" ? "Bike" : "Dock"} availability: ${formatPercent(
-          availability,
-        )}`,
-      );
+      const bounds = L.latLngBounds([]);
+      const color = displayMode === "bikes" ? "#c81e00" : "#1e64c8";
 
-      const marker = new mapboxgl.Marker(markerElement)
-        .setLngLat([station.lon, station.lat])
-        .setPopup(popup)
-        .addTo(mapRef.current!);
+      predictionData.stations.forEach((station) => {
+        const availability = getAvailability(station, selectedIndex, displayMode);
+        const latLng: [number, number] = [station.lat, station.lon];
+        const radius = availability * 22 + 7;
 
-      markersRef.current.push(marker);
-      bounds.extend([station.lon, station.lat]);
-    });
+        L.circleMarker(latLng, {
+          className: "station-marker",
+          color: "#ffffff",
+          fillColor: color,
+          fillOpacity: 0.72,
+          opacity: 1,
+          radius,
+          weight: 2,
+        })
+          .bindPopup(
+            `<strong>${station.name}</strong><br/>${displayMode === "bikes" ? "Bike" : "Dock"} availability: ${formatPercent(
+              availability,
+            )}`,
+          )
+          .addTo(markerLayerRef.current!);
 
-    if (!bounds.isEmpty()) {
-      mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 13 });
+        bounds.extend(latLng);
+      });
+
+      if (bounds.isValid()) {
+        mapRef.current.fitBounds(bounds, { maxZoom: 13, padding: [40, 40] });
+        requestAnimationFrame(() => {
+          mapRef.current?.invalidateSize();
+        });
+      }
     }
-  }, [data, selectedIndex, displayMode]);
+
+    renderMarkers();
+  }, [data, isMapReady, selectedIndex, displayMode]);
 
   return (
     <main className="page-shell">
@@ -215,13 +252,7 @@ export default function Home() {
       {!isLoading && !error ? (
         <section className="dashboard-grid">
           <div className="map-card">
-            {mapboxToken ? (
-              <div ref={mapContainerRef} className="map" />
-            ) : (
-              <div className="map map-fallback">
-                Add `NEXT_PUBLIC_MAPBOX_TOKEN` to render the interactive map.
-              </div>
-            )}
+            <div ref={mapContainerRef} className="map" />
           </div>
 
           <div className="table-card">
