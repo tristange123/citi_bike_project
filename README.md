@@ -113,6 +113,12 @@ uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 
 ```bash
 CITIBIKE_MODEL_NAME=baseline.cbm
+CORS_ORIGINS=*
+```
+
+For a stricter production setup, replace `*` with your exact frontend URL:
+
+```bash
 CORS_ORIGINS=https://your-frontend-domain.vercel.app
 ```
 
