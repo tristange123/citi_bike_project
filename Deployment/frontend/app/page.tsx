@@ -83,6 +83,7 @@ const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:80
 );
 
 const legColors = { walk: "#64748b", bike: "#1e64c8" };
+const retryDelaysMs = [3000, 6000, 12000, 20000, 30000];
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -119,6 +120,7 @@ export default function Home() {
   const [data, setData] = useState<PredictionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isWakingServer, setIsWakingServer] = useState(false);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("bikes");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isMapReady, setIsMapReady] = useState(false);
@@ -139,23 +141,43 @@ export default function Home() {
   viewRef.current = view;
 
   useEffect(() => {
+    let isCancelled = false;
+
     async function loadPredictions() {
-      try {
-        setIsLoading(true);
-        const response = await fetch(`${apiBaseUrl}/api/predictions`);
-        if (!response.ok) {
-          throw new Error(`Prediction API returned ${response.status}`);
+      setIsLoading(true);
+      // A sleeping free-tier backend can take a minute or more to boot, so retry before failing.
+      for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+        try {
+          const response = await fetch(`${apiBaseUrl}/api/predictions`);
+          if (!response.ok) {
+            throw new Error(`Prediction API returned ${response.status}`);
+          }
+          const body = await response.json();
+          if (!isCancelled) {
+            setData(body);
+            setError(null);
+            setIsLoading(false);
+          }
+          return;
+        } catch (err) {
+          if (isCancelled) {
+            return;
+          }
+          if (attempt === retryDelaysMs.length) {
+            setError(err instanceof Error ? err.message : "Failed to load predictions");
+            setIsLoading(false);
+            return;
+          }
+          setIsWakingServer(true);
+          await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
         }
-        setData(await response.json());
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load predictions");
-      } finally {
-        setIsLoading(false);
       }
     }
 
     loadPredictions();
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const timestamps = data?.stations[0]?.predictions.map((prediction) => prediction.timestamp) ?? [];
@@ -509,7 +531,13 @@ export default function Home() {
         </section>
       )}
 
-      {isLoading ? <div className="state-card">Loading predictions...</div> : null}
+      {isLoading ? (
+        <div className="state-card">
+          {isWakingServer
+            ? "Waking up the prediction server, this can take up to a minute..."
+            : "Loading predictions..."}
+        </div>
+      ) : null}
       {error ? <div className="state-card error">Could not load predictions: {error}</div> : null}
 
       {!isLoading && !error ? (
