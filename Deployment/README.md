@@ -36,6 +36,25 @@ Prediction data is served from:
 GET http://localhost:8000/api/predictions
 ```
 
+Route planning (the Navigate view) is served from:
+
+```text
+GET http://localhost:8000/api/route?from=40.7644,-73.9737&to=40.7046,-74.0136[&depart=2026-10-24T08:00]
+```
+
+It returns up to three walk → bike → walk options (`fastest`, `most reliable`, `alternate`) plus a `walk only` baseline, and `recommendedIndex` points at the lowest expected time. How it works:
+
+- **Candidates:** the 5 nearest stations with bikes around the start pin and with docks around the destination pin (800 m radius, widened up to 3.2 km).
+- **Travel times** (`backend/travel.py`): straight-line distance × 1.3 detour factor, at 1.4 m/s walking and 4.2 m/s biking, plus 60 s each to unlock and dock. There is no routing engine, so trips that cross rivers or go around parks come out optimistic.
+- **Availability:** live GBFS counts within 10 minutes. Further out, stations the model covers use the CatBoost forecast (fraction × live capacity); other stations use live counts discounted by 40%.
+- **Scoring** (`backend/planner.py`): travel time plus the chance a bike or dock is missing (`1 − e^(−expected count)`) times the walk to the next-nearest station.
+
+Run the backend tests from `Deployment/`:
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
 Optional environment variables:
 
 - `CITIBIKE_MODEL_NAME`: model filename inside `Models/`, defaulting to `baseline.cbm`.

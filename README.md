@@ -10,7 +10,7 @@ https://citibikecapacitypredictor.vercel.app/
 ## Architecture
 
 ```text
-model_testing.ipynb          # Jupyter Notebook for building the Cat Boost model
+model_testing.ipynb          # Jupyter Notebook for training and testing the Cat Boost model
 Deployment/
 ├── backend/                 # FastAPI prediction API
 ├── frontend/                # Next.js dashboard
