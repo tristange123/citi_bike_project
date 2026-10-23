@@ -82,7 +82,9 @@ const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:80
   "",
 );
 
-const legColors = { walk: "#64748b", bike: "#1e64c8" };
+const cartoApiKey = process.env.NEXT_PUBLIC_CARTO_API_KEY ?? "";
+
+const legColors ={ walk: "#64748b", bike: "#1e64c8" };
 const retryDelaysMs = [3000, 6000, 12000, 20000, 30000];
 
 function formatDateTime(value: string) {
@@ -215,12 +217,22 @@ export default function Home() {
         zoom: 12,
       });
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        maxZoom: 20,
-        subdomains: "abcd",
-      }).addTo(map);
+      // CARTO serves an "API key required" placeholder without a key, so fall back to plain OSM tiles.
+      if (cartoApiKey) {
+        L.tileLayer(
+          `https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=${cartoApiKey}`,
+          {
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            maxZoom: 20,
+          },
+        ).addTo(map);
+      } else {
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          maxZoom: 19,
+        }).addTo(map);
+      }
 
       // First click drops the start pin, second the destination; a third starts over.
       map.on("click", (event) => {

@@ -33,7 +33,7 @@ Runtime flow:
 
 - **FastAPI backend:** typed API service with one prediction endpoint and CORS configuration for the frontend.
 - **Next.js frontend:** single-page dashboard with loading/error states, time slider, Bikes/Docks toggle, and station table.
-- **Interactive map:** Leaflet with CARTO Positron tiles (OpenStreetMap data), so no Mapbox token or paid map provider is required.
+- **Interactive map:** Leaflet with CARTO Positron tiles (free API key), with an OpenStreetMap fallback, so no paid map provider is required.
 - **Live data integration:** pulls current station state from Citi Bike GBFS endpoints at request time.
 - **Model serving layer:** isolates model loading, feature creation, live-data adjustment, and JSON response formatting.
 - **Deployable split architecture:** backend and frontend can be deployed independently, which matches common production hosting setups.

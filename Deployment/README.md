@@ -70,7 +70,7 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-The map uses Leaflet with CARTO Positron tiles (OpenStreetMap data), so no map API token is required.
+The map uses Leaflet with CARTO Positron tiles, which need a free key from https://carto.com/basemaps/apikey set as `NEXT_PUBLIC_CARTO_API_KEY` (in `.env.local` locally and in Vercel environment variables in production). Without a key it falls back to standard OpenStreetMap tiles.
 
 The frontend reads the backend URL from:
 
