@@ -17,7 +17,7 @@ The backend keeps using these existing deployment assets:
 
 The backend owns model serving and live-data integration. It pulls current Citi Bike station data from GBFS, builds prediction features, runs the CatBoost model, adjusts near-term forecasts toward current station capacity, and returns frontend-ready JSON.
 
-The frontend is intentionally thin. It calls the backend API, lets the user switch between bike and dock availability, and renders the selected forecast hour on a Leaflet/OpenStreetMap map plus a station table.
+The frontend is intentionally thin. It calls the backend API, lets the user switch between bike and dock availability, and renders the selected forecast hour on a Leaflet map (CARTO Positron basemap) plus a station table.
 
 ## Backend
 
@@ -70,7 +70,7 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-The map uses Leaflet with OpenStreetMap tiles, so no map API token is required.
+The map uses Leaflet with CARTO Positron tiles (OpenStreetMap data), so no map API token is required.
 
 The frontend reads the backend URL from:
 
