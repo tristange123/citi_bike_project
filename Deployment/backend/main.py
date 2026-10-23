@@ -154,6 +154,12 @@ def pull_live_station_data(shortnames: set[str]) -> pd.DataFrame:
     return df.drop(columns=["short_name"])
 
 
+@lru_cache(maxsize=4)
+def load_holiday_dates(years: tuple[int, ...]) -> list:
+    # holidays.US is lazily populated, so years must be passed explicitly or keys() is empty.
+    return list(holidays.US(state="NY", years=years).keys())
+
+
 def add_prediction_features(df: pd.DataFrame, station_meta: dict[str, dict[str, Any]]) -> pd.DataFrame:
     df["Month"] = df["timestamp"].dt.month
     df["Day"] = df["timestamp"].dt.dayofweek
@@ -163,12 +169,11 @@ def add_prediction_features(df: pd.DataFrame, station_meta: dict[str, dict[str, 
     df["IsRushHour"] = (
         df["Hour"].isin([7, 8, 9, 16, 17, 18]) & (df["IsWeekend"] == 0)
     ).astype(int)
-    df["lat"] = df["shortname"].map(lambda shortname: station_meta[shortname]["lat"])
-    df["lon"] = df["shortname"].map(lambda shortname: station_meta[shortname]["lon"])
+    df["lat"] = df["shortname"].map({shortname: meta["lat"] for shortname, meta in station_meta.items()})
+    df["lon"] = df["shortname"].map({shortname: meta["lon"] for shortname, meta in station_meta.items()})
 
-    ny_holidays = holidays.US(state="NY")
-    holiday_dates = set(ny_holidays.keys())
-    df["IsHoliday"] = df["timestamp"].dt.date.isin(holiday_dates).astype(int)
+    years = tuple(sorted(int(year) for year in df["timestamp"].dt.year.unique()))
+    df["IsHoliday"] = df["timestamp"].dt.date.isin(load_holiday_dates(years)).astype(int)
     df["IsNonWorkingDay"] = ((df["IsWeekend"] == 1) | (df["IsHoliday"] == 1)).astype(int)
     return df
 
@@ -192,43 +197,44 @@ def get_predictions() -> PredictionResponse:
     model = load_model()
 
     timestamps = build_forecast_timestamps()
-    timestamp_df = pd.DataFrame({"timestamp": timestamps})
     current_capacities = dict(zip(live_df["shortname"], live_df["percentage_available"]))
     current_bikes = dict(zip(live_df["shortname"], live_df["num_bikes_available"]))
     current_docks = dict(zip(live_df["shortname"], live_df["num_docks_available"]))
     now_utc = datetime.now(tz=UTC_TZ)
 
+    station_names = [shortname for shortname in sorted(shortnames) if shortname in station_meta]
+
+    # One row per (station, timestamp), station-major, so predictions reshape to (stations, timestamps).
+    pred_df = pd.MultiIndex.from_product(
+        [station_names, pd.DatetimeIndex(timestamps)],
+        names=["shortname", "timestamp"],
+    ).to_frame(index=False)
+    pred_df = add_prediction_features(pred_df, station_meta)
+    raw_predictions = model.predict(pred_df[FEATURE_COLUMNS]).reshape(len(station_names), len(timestamps))
+
+    # Shift each station's forecast toward its live capacity, decaying linearly to zero over 24 hours.
+    current_capacity_array = np.array(
+        [current_capacities.get(shortname, np.nan) for shortname in station_names], dtype=float
+    )
+    initial_offsets = np.where(
+        np.isnan(current_capacity_array), 0.0, raw_predictions[:, 0] - current_capacity_array
+    )
+    seconds_ahead = np.array([(timestamp - now_utc).total_seconds() for timestamp in timestamps])
+    decay = np.clip(1 - seconds_ahead / 86400, 0, 1)
+    updated_predictions = np.clip(raw_predictions - initial_offsets[:, None] * decay[None, :], 0, 1)
+
+    timestamp_strings = [timestamp.astimezone(NY_TZ).isoformat() for timestamp in timestamps]
+
     stations: list[StationPrediction] = []
-    for shortname in sorted(shortnames):
-        if shortname not in station_meta:
-            continue
-
-        pred_df = timestamp_df.copy()
-        pred_df["shortname"] = shortname
-        pred_df = add_prediction_features(pred_df, station_meta)
-        pred_df["predictions"] = model.predict(pred_df[FEATURE_COLUMNS])
-
+    for shortname, station_predictions in zip(station_names, updated_predictions.tolist()):
         current_capacity = current_capacities.get(shortname)
-        if current_capacity is not None:
-            initial_offset = pred_df.loc[0, "predictions"] - current_capacity
-            decay = np.clip(
-                1 - ((pred_df["timestamp"] - now_utc).dt.total_seconds() / 86400),
-                0,
-                1,
-            )
-            pred_df["updated_predictions"] = pred_df["predictions"] - (initial_offset * decay)
-        else:
-            pred_df["updated_predictions"] = pred_df["predictions"]
-
-        pred_df["updated_predictions"] = pred_df["updated_predictions"].clip(lower=0, upper=1)
-
         predictions = [
             PredictionPoint(
-                timestamp=row.timestamp.astimezone(NY_TZ).isoformat(),
-                bikeAvailability=round(float(row.updated_predictions), 4),
-                dockAvailability=round(1 - float(row.updated_predictions), 4),
+                timestamp=timestamp_string,
+                bikeAvailability=round(value, 4),
+                dockAvailability=round(1 - value, 4),
             )
-            for row in pred_df.itertuples(index=False)
+            for timestamp_string, value in zip(timestamp_strings, station_predictions)
         ]
 
         meta = station_meta[shortname]
