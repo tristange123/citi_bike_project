@@ -19,6 +19,7 @@ from .forecast import (
     predict_raw,
     pull_live_station_data,
 )
+from . import ors
 from .gbfs_cache import load_network
 from .planner import plan_routes
 
@@ -73,6 +74,10 @@ class RouteLeg(BaseModel):
     end: RoutePoint
     meters: int
     seconds: int
+    # [[lat, lon], ...] along the streets, or just [start, end] when no route was available.
+    geometry: list[list[float]]
+    # True when meters/seconds are straight-line estimates rather than OpenRouteService results.
+    estimated: bool
 
 
 class RouteOption(BaseModel):
@@ -228,5 +233,7 @@ def get_route(
         depart_utc,
         partial(predict_counts, network, now_utc=now_utc),
         NY_TZ,
+        matrix_provider=ors.matrix,
+        directions_provider=ors.directions,
     )
     return RouteResponse.model_validate({"generatedAt": now_utc.astimezone(NY_TZ).isoformat(), **plan})

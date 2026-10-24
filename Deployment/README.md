@@ -45,7 +45,8 @@ GET http://localhost:8000/api/route?from=40.7644,-73.9737&to=40.7046,-74.0136[&d
 It returns up to three walk → bike → walk options (`fastest`, `most reliable`, `alternate`) plus a `walk only` baseline, and `recommendedIndex` points at the lowest expected time. How it works:
 
 - **Candidates:** the 5 nearest stations with bikes around the start pin and with docks around the destination pin (800 m radius, widened up to 3.2 km).
-- **Travel times** (`backend/travel.py`): straight-line distance × 1.3 detour factor, at 1.4 m/s walking and 4.2 m/s biking, plus 60 s each to unlock and dock. There is no routing engine, so trips that cross rivers or go around parks come out optimistic.
+- **Travel times** (`backend/ors.py`): with `ORS_API_KEY` set, [OpenRouteService](https://openrouteservice.org) supplies real times. Three Matrix API calls per trip rank the candidates on real walk and bike times. Directions API calls (≤ 10 per trip, cached) draw street-following paths for the displayed legs and give their final times.
+- **Fallback** (`backend/travel.py`): without a key, or when an ORS call fails (quota, timeout, no route), that piece uses straight-line distance × 1.3 at 1.4 m/s walking and 4.2 m/s biking, and the leg is drawn as a straight line marked `estimated: true`. These estimates run optimistic across rivers and parks. Every trip adds 60 s each to unlock and dock.
 - **Availability:** live GBFS counts within 10 minutes. Further out, stations the model covers use the CatBoost forecast (fraction × live capacity); other stations use live counts discounted by 40%.
 - **Scoring** (`backend/planner.py`): travel time plus the chance a bike or dock is missing (`1 − e^(−expected count)`) times the walk to the next-nearest station.
 
@@ -59,6 +60,7 @@ Optional environment variables:
 
 - `CITIBIKE_MODEL_NAME`: model filename inside `Models/`, defaulting to `baseline.cbm`.
 - `CORS_ORIGINS`: comma-separated frontend origins, defaulting to `http://localhost:3000`.
+- `ORS_API_KEY`: free OpenRouteService key (sign up at openrouteservice.org) for real route times and paths. One trip costs about 3 matrix and up to 10 directions requests against the free tier's daily and per-minute quotas. The key stays on the backend and is never sent to browsers. Locally, put `ORS_API_KEY=...` in `Deployment/.env` (git-ignored) and run `uvicorn backend.main:app --reload --env-file .env`.
 
 ## Frontend
 
@@ -95,6 +97,7 @@ Set environment variables:
 
 ```bash
 CITIBIKE_MODEL_NAME=baseline.cbm
+ORS_API_KEY=your-openrouteservice-key
 CORS_ORIGINS=*
 ```
 

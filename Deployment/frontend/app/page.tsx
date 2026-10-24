@@ -52,6 +52,8 @@ type RouteLeg = {
   end: RoutePoint;
   meters: number;
   seconds: number;
+  geometry: LatLng[];
+  estimated: boolean;
 };
 
 type RouteOption = {
@@ -387,18 +389,12 @@ export default function Home() {
       routes.forEach((route, index) => {
         const isSelected = index === selectedRoute;
         route.legs.forEach((leg) => {
-          const line = L.polyline(
-            [
-              [leg.start.lat, leg.start.lon],
-              [leg.end.lat, leg.end.lon],
-            ],
-            {
-              color: legColors[leg.mode],
-              dashArray: leg.mode === "walk" ? "6 8" : undefined,
-              opacity: isSelected ? 0.95 : 0.25,
-              weight: isSelected ? (leg.mode === "bike" ? 6 : 4) : 3,
-            },
-          ).addTo(layer);
+          const line = L.polyline(leg.geometry, {
+            color: legColors[leg.mode],
+            dashArray: leg.mode === "walk" ? "6 8" : undefined,
+            opacity: isSelected ? 0.95 : 0.25,
+            weight: isSelected ? (leg.mode === "bike" ? 6 : 4) : 3,
+          }).addTo(layer);
           if (isSelected) {
             line.bringToFront();
             bounds.extend(line.getBounds());
@@ -649,7 +645,7 @@ export default function Home() {
                     ) : null}
                   </button>
                 ))}
-                {routeData ? (
+                {routeData?.routes[selectedRoute]?.legs.some((leg) => leg.estimated) ? (
                   <p className="route-message">
                     Times are straight-line estimates and run optimistic across rivers and parks.
                   </p>

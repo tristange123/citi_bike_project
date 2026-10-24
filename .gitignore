@@ -3,3 +3,4 @@ Deployment/.venv/
 Deployment/frontend/.next/
 Deployment/frontend/node_modules/
 .env*.local
+.env

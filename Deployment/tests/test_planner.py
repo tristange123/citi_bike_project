@@ -82,5 +82,75 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(len({r["dropoff"]["name"] for r in bike_routes}), 3)
 
 
+
+class ProviderTest(unittest.TestCase):
+    """Matrix/directions providers replace estimates, and None falls back to them."""
+
+    far = 40.70 + 5 * KM
+
+    def network(self):
+        # Two equivalent pickups side by side, one dropoff.
+        return make_network([
+            (40.70, -74.0000, 10, 5),
+            (40.70, -74.0005, 10, 5),
+            (self.far, -74.00, 5, 10),
+        ])
+
+    def plan(self, network, **providers):
+        return plan_routes(network, (40.70, -74.00), (self.far, -74.00), DEPART, live_counts(network), UTC, **providers)
+
+    def test_matrix_bike_times_drive_ranking(self):
+        network = self.network()
+        baseline = self.plan(network)
+        self.assertEqual(baseline["routes"][0]["pickup"]["name"], "S0")
+
+        def matrix(mode, sources, destinations):
+            seconds = np.full((len(sources), len(destinations)), 60.0)
+            if mode == "bike":
+                seconds[0, :] = 5000  # S0's ride is blocked by, say, a river
+                seconds[1, :] = 900
+            return seconds, seconds * 4
+
+        plan = self.plan(network, matrix_provider=matrix)
+        fastest = plan["routes"][0]
+        self.assertEqual(fastest["pickup"]["name"], "S1")
+        self.assertEqual(fastest["legs"][1]["seconds"], 900 + 120)
+        self.assertFalse(any(leg["estimated"] for leg in fastest["legs"]))
+
+    def test_failed_providers_fall_back_to_estimates(self):
+        network = self.network()
+        baseline = self.plan(network)
+        plan = self.plan(network, matrix_provider=lambda *a: None, directions_provider=lambda *a: None)
+        self.assertEqual(plan, baseline)
+        for route in plan["routes"]:
+            for leg in route["legs"]:
+                self.assertTrue(leg["estimated"])
+                self.assertEqual(len(leg["geometry"]), 2)
+
+    def test_directions_set_geometry_and_relabel(self):
+        network = self.network()
+        calls = []
+
+        def directions(mode, start, end):
+            calls.append((mode, start, end))
+            # The S0 ride turns out much slower on real streets.
+            slow = mode == "bike" and start == (40.70, -74.0000)
+            return {"geometry": [list(start), [0.0, 0.0], list(end)], "meters": 1000.0, "seconds": 4000.0 if slow else 300.0}
+
+        plan = self.plan(network, directions_provider=directions)
+        bike_routes = [r for r in plan["routes"] if r["pickup"]]
+        self.assertEqual(bike_routes[0]["label"], "fastest")
+        self.assertEqual(bike_routes[0]["pickup"]["name"], "S1")
+        self.assertEqual(bike_routes[1]["pickup"]["name"], "S0")
+        self.assertEqual(bike_routes[1]["label"], "alternate")
+        for route in plan["routes"]:
+            self.assertEqual(route["totalSeconds"], sum(leg["seconds"] for leg in route["legs"]))
+            for leg in route["legs"]:
+                self.assertEqual(len(leg["geometry"]), 3)
+                self.assertFalse(leg["estimated"])
+        # Legs shared between routes (walk to the single dropoff's destination) are fetched once.
+        self.assertEqual(len(calls), len(set(calls)))
+
+
 if __name__ == "__main__":
     unittest.main()

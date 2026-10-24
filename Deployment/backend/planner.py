@@ -1,6 +1,7 @@
 """Walk -> bike -> walk route planning over station candidates near two pins."""
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -27,6 +28,10 @@ MIN_FALLBACK_SECONDS = 120
 
 # (station_idx, kinds, timestamps) -> expected count of bikes/docks at each query.
 CountPredictor = Callable[[np.ndarray, np.ndarray, list[datetime]], np.ndarray]
+# (mode, sources, destinations) -> (seconds, meters) arrays, or None to use estimates.
+MatrixProvider = Callable[[str, list[tuple[float, float]], list[tuple[float, float]]], tuple[np.ndarray, np.ndarray] | None]
+# (mode, start, end) -> {"geometry": [[lat, lon], ...], "meters", "seconds"}, or None to keep the estimate.
+DirectionsProvider = Callable[[str, tuple[float, float], tuple[float, float]], dict | None]
 
 
 def find_candidates(network: pd.DataFrame, lat: float, lon: float, available: np.ndarray) -> np.ndarray:
@@ -65,8 +70,37 @@ def _point(name: str, lat: float, lon: float) -> dict:
     return {"name": name, "lat": float(lat), "lon": float(lon)}
 
 
-def _leg(mode: str, start: dict, end: dict, meters: float, seconds: float) -> dict:
-    return {"mode": mode, "start": start, "end": end, "meters": round(float(meters)), "seconds": round(float(seconds))}
+def _leg(mode: str, start: dict, end: dict, meters: float, seconds: float, estimated: bool = True) -> dict:
+    return {
+        "mode": mode,
+        "start": start,
+        "end": end,
+        "meters": round(float(meters)),
+        "seconds": round(float(seconds)),
+        # A straight segment until directions replace it with the street path.
+        "geometry": [[start["lat"], start["lon"]], [end["lat"], end["lon"]]],
+        "estimated": estimated,
+    }
+
+
+def _travel_times(
+    matrix_provider: MatrixProvider | None,
+    mode: str,
+    sources: list[tuple[float, float]],
+    destinations: list[tuple[float, float]],
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """(seconds, meters, estimated) from every source to every destination."""
+    if matrix_provider is not None:
+        result = matrix_provider(mode, sources, destinations)
+        if result is not None:
+            seconds, meters = result
+            return np.asarray(seconds, dtype=float), np.asarray(meters, dtype=float), False
+
+    src = np.asarray(sources, dtype=float)
+    dst = np.asarray(destinations, dtype=float)
+    meters = path_meters(src[:, None, 0], src[:, None, 1], dst[None, :, 0], dst[None, :, 1])
+    seconds = walk_seconds(meters) if mode == "walk" else bike_seconds(meters)
+    return seconds, meters, True
 
 
 def _iso(timestamp: datetime, tz) -> str:
@@ -108,6 +142,62 @@ def _pick_routes(order: np.ndarray, expected: np.ndarray, reliability: np.ndarra
     return chosen
 
 
+def _relabel(bike_routes: list[dict]) -> list[dict]:
+    """Sort bike routes by expected time and reassign fastest / most reliable / alternate labels."""
+    bike_routes = sorted(bike_routes, key=lambda route: route["expectedSeconds"])
+    if not bike_routes:
+        return bike_routes
+
+    fastest = bike_routes[0]
+    reliable = [
+        route for route in bike_routes[1:]
+        if route["expectedSeconds"] <= fastest["expectedSeconds"] * RELIABLE_TIME_SLACK
+        and route["reliability"] > fastest["reliability"]
+    ]
+    most_reliable = max(reliable, key=lambda route: route["reliability"]) if reliable else None
+    for route in bike_routes:
+        route["label"] = (
+            "fastest" if route is fastest else "most reliable" if route is most_reliable else "alternate"
+        )
+    return bike_routes
+
+
+def _apply_directions(routes: list[dict], directions_provider: DirectionsProvider, depart: datetime, tz) -> bool:
+    """Swap estimated legs for real street paths and times; returns whether any leg changed."""
+    def leg_key(leg: dict) -> tuple:
+        return (leg["mode"], (leg["start"]["lat"], leg["start"]["lon"]), (leg["end"]["lat"], leg["end"]["lon"]))
+
+    keys = list(dict.fromkeys(leg_key(leg) for route in routes for leg in route["legs"]))
+    with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+        results = dict(zip(keys, pool.map(lambda key: directions_provider(*key), keys)))
+
+    changed = False
+    for route in routes:
+        route_changed = False
+        for leg in route["legs"]:
+            result = results[leg_key(leg)]
+            if result is None:
+                continue
+            overhead = UNLOCK_SECONDS + DOCK_SECONDS if leg["mode"] == "bike" else 0
+            leg.update(
+                geometry=result["geometry"],
+                meters=round(result["meters"]),
+                seconds=round(result["seconds"] + overhead),
+                estimated=False,
+            )
+            route_changed = True
+        if not route_changed:
+            continue
+        changed = True
+
+        # The availability penalty (expected - total) carries over unchanged.
+        total = sum(leg["seconds"] for leg in route["legs"])
+        route["expectedSeconds"] += total - route["totalSeconds"]
+        route["totalSeconds"] = total
+        route["arriveAt"] = _iso(depart + timedelta(seconds=total), tz)
+    return changed
+
+
 def plan_routes(
     network: pd.DataFrame,
     origin: tuple[float, float],
@@ -115,8 +205,15 @@ def plan_routes(
     depart: datetime,
     predict_counts: CountPredictor,
     tz,
+    matrix_provider: MatrixProvider | None = None,
+    directions_provider: DirectionsProvider | None = None,
 ) -> dict:
-    """Ranked route options from origin to destination: up to 3 bike routes plus walking only."""
+    """Ranked route options from origin to destination: up to 3 bike routes plus walking only.
+
+    Candidates are always chosen by straight-line distance. Providers, when given, supply real
+    travel times for ranking (matrix) and street paths for the displayed legs (directions);
+    anything they cannot answer falls back to the straight-line estimates.
+    """
     origin_point = _point("Start", *origin)
     destination_point = _point("Destination", *destination)
 
@@ -144,21 +241,33 @@ def plan_routes(
         dtype=int,
     ).reshape(-1, 2)
     if len(pairs) == 0:
-        return {"routes": [walk_route], "recommendedIndex": 0}
+        routes = [walk_route]
+        if directions_provider is not None:
+            _apply_directions(routes, directions_provider, depart, tz)
+        return {"routes": routes, "recommendedIndex": 0}
 
     lats = network["lat"].to_numpy()
     lons = network["lon"].to_numpy()
-    o_lat, o_lon = lats[origin_idx], lons[origin_idx]
-    d_lat, d_lon = lats[dest_idx], lons[dest_idx]
+    origin_stations = list(zip(lats[origin_idx], lons[origin_idx]))
+    dest_stations = list(zip(lats[dest_idx], lons[dest_idx]))
 
-    walk_a_meters = path_meters(*origin, o_lat, o_lon)
-    walk_b_meters = path_meters(d_lat, d_lon, *destination)
-    walk_a = walk_seconds(walk_a_meters)
-    walk_b = walk_seconds(walk_b_meters)
+    # Three independent lookups: pin A -> pickups (walk), pickups -> dropoffs (bike), dropoffs -> pin B (walk).
+    lookups = [
+        ("walk", [origin], origin_stations),
+        ("bike", origin_stations, dest_stations),
+        ("walk", dest_stations, [destination]),
+    ]
+    with ThreadPoolExecutor(max_workers=len(lookups)) as pool:
+        to_pickup, bike_grid, from_dropoff = pool.map(
+            lambda lookup: _travel_times(matrix_provider, *lookup), lookups
+        )
+    walk_a, walk_a_meters, walk_a_est = to_pickup[0][0], to_pickup[1][0], to_pickup[2]
+    ride_all, bike_meters_all, bike_est = bike_grid
+    walk_b, walk_b_meters, walk_b_est = from_dropoff[0][:, 0], from_dropoff[1][:, 0], from_dropoff[2]
 
     pi, pj = pairs[:, 0], pairs[:, 1]
-    bike_meters = path_meters(o_lat[pi], o_lon[pi], d_lat[pj], d_lon[pj])
-    ride = bike_seconds(bike_meters)
+    bike_meters = bike_meters_all[pi, pj]
+    ride = ride_all[pi, pj]
     seconds_to_dock = walk_a[pi] + UNLOCK_SECONDS + ride
     total = seconds_to_dock + DOCK_SECONDS + walk_b[pj]
 
@@ -199,9 +308,12 @@ def plan_routes(
                 "departAt": _iso(depart, tz),
                 "arriveAt": _iso(depart + timedelta(seconds=float(total[p])), tz),
                 "legs": [
-                    _leg("walk", origin_point, pickup_point, walk_a_meters[i], walk_a[i]),
-                    _leg("bike", pickup_point, dropoff_point, bike_meters[p], ride[p] + UNLOCK_SECONDS + DOCK_SECONDS),
-                    _leg("walk", dropoff_point, destination_point, walk_b_meters[j], walk_b[j]),
+                    _leg("walk", origin_point, pickup_point, walk_a_meters[i], walk_a[i], walk_a_est),
+                    _leg(
+                        "bike", pickup_point, dropoff_point, bike_meters[p],
+                        ride[p] + UNLOCK_SECONDS + DOCK_SECONDS, bike_est,
+                    ),
+                    _leg("walk", dropoff_point, destination_point, walk_b_meters[j], walk_b[j], walk_b_est),
                 ],
                 "pickup": {
                     **pickup_point,
@@ -223,6 +335,10 @@ def plan_routes(
                 },
             }
         )
+
+    if directions_provider is not None and _apply_directions(routes + [walk_route], directions_provider, depart, tz):
+        # Real times can reorder routes picked on estimates, e.g. a river crossing that was optimistic.
+        routes = _relabel(routes)
 
     routes.append(walk_route)
     recommended = min(range(len(routes)), key=lambda k: routes[k]["expectedSeconds"])
