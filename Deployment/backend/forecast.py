@@ -13,15 +13,6 @@ from zoneinfo import ZoneInfo
 
 from .gbfs_cache import fetch_station_frame
 
-
-BASE_DIR = Path(__file__).resolve().parents[1]
-STATIONS_CSV = BASE_DIR / "citibike-stations.csv"
-STATIONS_JSON = BASE_DIR / "true_valid_stations_list.json"
-MODEL_PATH = BASE_DIR / "Models" / os.getenv("CITIBIKE_MODEL_NAME", "baseline.cbm")
-
-NY_TZ = ZoneInfo("America/New_York")
-UTC_TZ = ZoneInfo("UTC")
-
 FEATURE_COLUMNS = [
     "shortname",
     "Month",

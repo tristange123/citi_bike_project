@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
+import type { CircleMarker, FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
 
 type DisplayMode = "bikes" | "docks";
 type View = "forecast" | "navigate";
@@ -157,6 +157,7 @@ export default function Home() {
   const [isWakingServer, setIsWakingServer] = useState(false);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("bikes");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [stationQuery, setStationQuery] = useState("");
   const [isMapReady, setIsMapReady] = useState(false);
 
   const [view, setView] = useState<View>("navigate");
@@ -172,6 +173,7 @@ export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markerLayerRef = useRef<LayerGroup | null>(null);
+  const stationMarkersRef = useRef(new Map<string, CircleMarker>());
   const routeLayerRef = useRef<LayerGroup | null>(null);
   const routeAbortRef = useRef<AbortController | null>(null);
   // The map click handler is registered once, so it reads the current view through a ref.
@@ -236,13 +238,18 @@ export default function Home() {
       return [];
     }
 
+    const query = stationQuery.trim().toLowerCase();
     return data.stations
+      .filter(
+        (station) =>
+          !query || station.name.toLowerCase().includes(query) || station.shortname.toLowerCase().includes(query),
+      )
       .map((station) => ({
         ...station,
         displayAvailability: getAvailability(station, selectedIndex, displayMode),
       }))
       .sort((a, b) => b.displayAvailability - a.displayAvailability);
-  }, [data, selectedIndex, displayMode]);
+  }, [data, selectedIndex, displayMode, stationQuery]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -343,6 +350,7 @@ export default function Home() {
       }
 
       markerLayerRef.current.clearLayers();
+      stationMarkersRef.current.clear();
       if (view === "navigate") {
         return;
       }
@@ -353,7 +361,7 @@ export default function Home() {
         const availability = getAvailability(station, selectedIndex, displayMode);
         const radius = availability * 22 + 7;
 
-        L.circleMarker([station.lat, station.lon], {
+        const marker = L.circleMarker([station.lat, station.lon], {
           className: "station-marker",
           color: "#ffffff",
           fillColor: color,
@@ -368,6 +376,7 @@ export default function Home() {
             )}`,
           )
           .addTo(markerLayerRef.current!);
+        stationMarkersRef.current.set(station.shortname, marker);
       });
     }
 
@@ -500,6 +509,11 @@ export default function Home() {
 
     renderRoute();
   }, [isMapReady, view, pins, routeData, selectedRoute]);
+
+  function focusStation(station: StationPrediction) {
+    mapRef.current?.flyTo([station.lat, station.lon], 17, { duration: 0.6 });
+    stationMarkersRef.current.get(station.shortname)?.openPopup();
+  }
 
   const navigateHint = !pins.origin
     ? "Click the map to drop your start pin."
@@ -694,6 +708,20 @@ export default function Home() {
             {error ? <p className="route-message error">Could not load predictions: {error}</p> : null}
 
             {data ? (
+              <input
+                aria-label="Search stations"
+                className="search-input"
+                onChange={(event) => setStationQuery(event.target.value)}
+                placeholder={`Search ${data.stations.length} stations by name or ID`}
+                type="search"
+                value={stationQuery}
+              />
+            ) : null}
+            {data && tableRows.length === 0 ? (
+              <p className="route-message">No stations match &ldquo;{stationQuery.trim()}&rdquo;.</p>
+            ) : null}
+
+            {data && tableRows.length > 0 ? (
               <div className="table-scroll">
                 <table>
                   <thead>
@@ -705,7 +733,7 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {tableRows.map((station) => (
-                      <tr key={station.shortname}>
+                      <tr className="station-row" key={station.shortname} onClick={() => focusStation(station)}>
                         <td>
                           <strong>{station.name}</strong>
                           <span>{station.shortname}</span>
