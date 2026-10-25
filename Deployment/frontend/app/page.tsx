@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
+import { AddressInput, type AddressResult } from "./address-input";
 import { RouteCard, type RouteOption } from "./route-card";
 import { StationForecastChart } from "./station-forecast-chart";
 
@@ -54,7 +55,13 @@ type StationInfo = {
 type Pins = {
   origin: LatLng | null;
   destination: LatLng | null;
+  // What the address boxes show: the chosen address, or "Dropped pin" for a map click.
+  originLabel: string;
+  destinationLabel: string;
 };
+
+const emptyPins: Pins = { origin: null, destination: null, originLabel: "", destinationLabel: "" };
+const droppedPinLabel = "Dropped pin";
 
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(
   /\/$/,
@@ -169,7 +176,7 @@ export default function Home() {
   const [isMapReady, setIsMapReady] = useState(false);
 
   const [view, setView] = useState<View>("navigate");
-  const [pins, setPins] = useState<Pins>({ origin: null, destination: null });
+  const [pins, setPins] = useState<Pins>(emptyPins);
   // Empty means "leave now"; otherwise a New York datetime-local value.
   const [departAt, setDepartAt] = useState("");
   const [nowValue, setNowValue] = useState("");
@@ -196,7 +203,8 @@ export default function Home() {
   viewRef.current = view;
   // Once routes are planned (or being planned) the pins stay put until "Redraw pins".
   const pinsLockedRef = useRef(false);
-  pinsLockedRef.current = routeData !== null || isRouteLoading;
+  const pinsLocked = routeData !== null || isRouteLoading;
+  pinsLockedRef.current = pinsLocked;
 
   useEffect(() => {
     let isCancelled = false;
@@ -365,10 +373,13 @@ export default function Home() {
           return;
         }
         const point: LatLng = [event.latlng.lat, event.latlng.lng];
+        // Clicks fill whichever slot is empty (an address may have filled the other); with both set, start over.
         setPins((previous) =>
-          !previous.origin || previous.destination
-            ? { origin: point, destination: null }
-            : { origin: previous.origin, destination: point },
+          !previous.origin
+            ? { ...previous, origin: point, originLabel: droppedPinLabel }
+            : !previous.destination
+              ? { ...previous, destination: point, destinationLabel: droppedPinLabel }
+              : { ...emptyPins, origin: point, originLabel: droppedPinLabel },
         );
       });
 
@@ -622,10 +633,23 @@ export default function Home() {
     map.flyTo([station.lat, station.lon], 17, { duration: 0.6 });
   }
 
+  function setPinFromAddress(slot: "origin" | "destination", result: AddressResult) {
+    const point: LatLng = [result.lat, result.lon];
+    setPins((previous) =>
+      slot === "origin"
+        ? { ...previous, origin: point, originLabel: result.label }
+        : { ...previous, destination: point, destinationLabel: result.label },
+    );
+    const map = mapRef.current;
+    if (map && !map.getBounds().contains(point)) {
+      map.panTo(point);
+    }
+  }
+
   const navigateHint = !pins.origin
-    ? "Click the map to drop your start pin."
+    ? "Search an address or click the map to set your start."
     : !pins.destination
-      ? "Click the map again to drop your destination."
+      ? "Search an address or click the map to set your destination."
       : routeData
         ? "Redraw pins to plan a different trip."
         : "Pick a departure time, then generate routes.";
@@ -668,22 +692,28 @@ export default function Home() {
         {view === "navigate" ? (
           <>
             <section className="panel-section">
-              <ol className="trip-pins">
-                <li className={pins.origin ? "set" : ""}>
-                  <span className="pin-dot start" />
-                  <span>{pins.origin ? "Start pinned" : "Start: click the map"}</span>
-                </li>
-                <li className={pins.destination ? "set" : ""}>
-                  <span className="pin-dot destination" />
-                  <span>
-                    {pins.destination ? "Destination pinned" : pins.origin ? "Destination: click the map" : "Destination"}
-                  </span>
-                </li>
-              </ol>
+              <div className="address-fields">
+                <AddressInput
+                  apiBaseUrl={apiBaseUrl}
+                  disabled={pinsLocked}
+                  dotClassName="start"
+                  onSelect={(result) => setPinFromAddress("origin", result)}
+                  placeholder="Start: search or click the map"
+                  value={pins.originLabel}
+                />
+                <AddressInput
+                  apiBaseUrl={apiBaseUrl}
+                  disabled={pinsLocked}
+                  dotClassName="destination"
+                  onSelect={(result) => setPinFromAddress("destination", result)}
+                  placeholder="Destination: search or click the map"
+                  value={pins.destinationLabel}
+                />
+              </div>
               <button
                 className="text-button"
-                disabled={!pins.origin}
-                onClick={() => setPins({ origin: null, destination: null })}
+                disabled={pinsLocked || (!pins.origin && !pins.destination)}
+                onClick={() => setPins(emptyPins)}
                 type="button"
               >
                 Clear pins
@@ -716,7 +746,7 @@ export default function Home() {
             {routeData ? (
               <button
                 className="generate-button secondary"
-                onClick={() => setPins({ origin: null, destination: null })}
+                onClick={() => setPins(emptyPins)}
                 type="button"
               >
                 Redraw pins

@@ -43,6 +43,54 @@ def _post(path: str, body: dict) -> dict | None:
         return None
 
 
+def _get(path: str, params: dict) -> dict | None:
+    api_key = os.getenv("ORS_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        response = requests.get(
+            f"{ORS_BASE_URL}{path}",
+            params=params,
+            headers={"Authorization": api_key},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("ORS request to %s failed: %s", path, exc)
+        return None
+
+
+def autocomplete(text: str, bounds: dict[str, tuple[float, float]], size: int = 6) -> list[dict] | None:
+    """[{"label", "lat", "lon"}, ...] for places matching text inside bounds {"lat": (min, max), "lon": (min, max)}."""
+    (lat_min, lat_max), (lon_min, lon_max) = bounds["lat"], bounds["lon"]
+    data = _get(
+        "/geocode/autocomplete",
+        {
+            "text": text,
+            "size": size,
+            "boundary.rect.min_lat": lat_min,
+            "boundary.rect.max_lat": lat_max,
+            "boundary.rect.min_lon": lon_min,
+            "boundary.rect.max_lon": lon_max,
+            "focus.point.lat": (lat_min + lat_max) / 2,
+            "focus.point.lon": (lon_min + lon_max) / 2,
+        },
+    )
+    if data is None:
+        return None
+
+    try:
+        return [
+            {"label": feature["properties"]["label"], "lat": lat, "lon": lon}
+            for feature in data["features"]
+            for lon, lat, *_ in [feature["geometry"]["coordinates"]]
+        ]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def matrix(
     mode: str,
     sources: list[tuple[float, float]],

@@ -183,24 +183,79 @@ h1 {
 
 /* Trip pins */
 
-.trip-pins {
+.address-fields {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
 }
 
-.trip-pins li {
+.address-field {
   align-items: center;
-  color: var(--faint);
   display: flex;
   gap: 10px;
+  position: relative;
 }
 
-.trip-pins li.set {
+.address-input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   color: var(--text);
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+}
+
+.address-input:focus {
+  border-color: var(--text);
+  outline: none;
+}
+
+.address-input:disabled {
+  background: var(--hover);
+  color: var(--muted);
+}
+
+.address-results {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  left: 20px;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+}
+
+.address-results li {
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+}
+
+.address-results li.active {
+  background: var(--hover);
+}
+
+.address-results li strong {
+  font-weight: 500;
+}
+
+.address-results li span {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.address-results li.address-status {
+  color: var(--muted);
+  cursor: default;
+  font-size: 13px;
 }
 
 .pin-dot {

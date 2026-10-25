@@ -19,7 +19,7 @@ from .forecast import (
     predict_raw,
     pull_live_station_data,
 )
-from . import ors
+from . import geocode, ors
 from .gbfs_cache import load_network
 from .planner import plan_routes
 
@@ -92,6 +92,16 @@ class RouteOption(BaseModel):
     legs: list[RouteLeg]
     pickup: RouteStation | None
     dropoff: RouteStation | None
+
+
+class GeocodeResult(BaseModel):
+    label: str
+    lat: float
+    lon: float
+
+
+class GeocodeResponse(BaseModel):
+    results: list[GeocodeResult]
 
 
 class RouteResponse(BaseModel):
@@ -238,3 +248,11 @@ def get_route(
         directions_provider=ors.directions,
     )
     return RouteResponse.model_validate({"generatedAt": now_utc.astimezone(NY_TZ).isoformat(), **plan})
+
+
+@app.get("/api/geocode", response_model=GeocodeResponse)
+def get_geocode(q: str = Query(max_length=120, description="Address or place to search for")) -> GeocodeResponse:
+    text = q.strip()
+    if len(text) < 3:
+        return GeocodeResponse(results=[])
+    return GeocodeResponse.model_validate({"results": geocode.search(text, SERVICE_AREA)})
