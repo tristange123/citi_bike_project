@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CircleMarker, FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
+import type { FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
+import { StationForecastChart } from "./station-forecast-chart";
 
 type DisplayMode = "bikes" | "docks";
 type View = "forecast" | "navigate";
@@ -74,6 +75,18 @@ type RouteResponse = {
   recommendedIndex: number;
 };
 
+// What the hover card and forecast chart need, whether the station came from the forecast or a route.
+type StationInfo = {
+  shortname: string;
+  name: string;
+  lat: number;
+  lon: number;
+  bikes: number | null;
+  docks: number | null;
+  ebikes: number | null;
+  forecast: StationPrediction | null;
+};
+
 type Pins = {
   origin: LatLng | null;
   destination: LatLng | null;
@@ -91,6 +104,8 @@ const lesSouthWest: LatLng = [40.7, -74.02];
 const lesNorthEast: LatLng = [40.741, -73.97];
 
 const legColors ={ walk: "#64748b", bike: "#1e64c8" };
+const seriesColors: Record<DisplayMode, string> = { bikes: "#c81e00", docks: "#1e64c8" };
+const cardHideDelayMs = 200;
 const retryDelaysMs = [3000, 6000, 12000, 20000, 30000];
 const maxDepartAheadMs = 7 * 24 * 60 * 60 * 1000 - 10 * 60 * 1000;
 
@@ -145,6 +160,37 @@ function panelPadding(): FitBoundsOptions {
   };
 }
 
+function stationInfoFromForecast(station: StationPrediction, ebikes: number | null = null): StationInfo {
+  return {
+    shortname: station.shortname,
+    name: station.name,
+    lat: station.lat,
+    lon: station.lon,
+    bikes: station.currentBikesAvailable,
+    docks: station.currentDocksAvailable,
+    ebikes,
+    forecast: station,
+  };
+}
+
+// Forecast fractions become counts using the docks in service now; without live counts, percentages.
+function forecastSeries(station: StationInfo, mode: DisplayMode) {
+  const capacity = station.bikes !== null && station.docks !== null ? station.bikes + station.docks : 0;
+  const points = (station.forecast?.predictions ?? []).map((prediction) => {
+    const share = mode === "bikes" ? prediction.bikeAvailability : prediction.dockAvailability;
+    return { time: Date.parse(prediction.timestamp), value: capacity > 0 ? share * capacity : share * 100 };
+  });
+  const noun = mode === "bikes" ? "bikes" : "docks";
+  return {
+    capacity,
+    points,
+    max: capacity > 0 ? capacity : 100,
+    formatTick: (value: number) => (capacity > 0 ? String(value) : `${value}%`),
+    formatValue: (value: number) =>
+      capacity > 0 ? `${Math.round(value)} ${Math.round(value) === 1 ? noun.slice(0, -1) : noun}` : `${Math.round(value)}%`,
+  };
+}
+
 function getAvailability(station: StationPrediction, selectedIndex: number, mode: DisplayMode) {
   const prediction = station.predictions[selectedIndex];
   return mode === "bikes" ? prediction.bikeAvailability : prediction.dockAvailability;
@@ -169,13 +215,17 @@ export default function Home() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState(0);
+  const [hoveredStation, setHoveredStation] = useState<StationInfo | null>(null);
+  const [chartStation, setChartStation] = useState<StationInfo | null>(null);
+  const [chartMode, setChartMode] = useState<DisplayMode>("bikes");
+  const [, setMapTick] = useState(0);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markerLayerRef = useRef<LayerGroup | null>(null);
-  const stationMarkersRef = useRef(new Map<string, CircleMarker>());
   const routeLayerRef = useRef<LayerGroup | null>(null);
   const routeAbortRef = useRef<AbortController | null>(null);
+  const hideCardTimerRef = useRef<number | null>(null);
   // The map click handler is registered once, so it reads the current view through a ref.
   const viewRef = useRef<View>(view);
   viewRef.current = view;
@@ -229,6 +279,32 @@ export default function Home() {
     const interval = setInterval(update, 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Leaflet handlers are bound once per marker, so these only touch setters and refs.
+  function cancelHideCard() {
+    if (hideCardTimerRef.current !== null) {
+      window.clearTimeout(hideCardTimerRef.current);
+      hideCardTimerRef.current = null;
+    }
+  }
+
+  function showStationCard(station: StationInfo) {
+    cancelHideCard();
+    setHoveredStation(station);
+  }
+
+  // A short delay lets the pointer travel from the marker onto the card without it vanishing.
+  function scheduleHideCard() {
+    cancelHideCard();
+    hideCardTimerRef.current = window.setTimeout(() => setHoveredStation(null), cardHideDelayMs);
+  }
+
+  function openChart(station: StationInfo) {
+    cancelHideCard();
+    setHoveredStation(null);
+    setChartMode(viewRef.current === "forecast" ? displayMode : "bikes");
+    setChartStation(station);
+  }
 
   const timestamps = data?.stations[0]?.predictions.map((prediction) => prediction.timestamp) ?? [];
   const selectedTimestamp = timestamps[selectedIndex];
@@ -303,6 +379,10 @@ export default function Home() {
 
       // First click drops the start pin, second the destination; a third starts over.
       map.on("click", (event) => {
+        const target = event.originalEvent.target as Element | null;
+        if (!target?.classList?.contains("station-marker")) {
+          setHoveredStation(null);
+        }
         if (viewRef.current !== "navigate" || !lesBounds.contains(event.latlng)) {
           return;
         }
@@ -350,38 +430,61 @@ export default function Home() {
       }
 
       markerLayerRef.current.clearLayers();
-      stationMarkersRef.current.clear();
-      if (view === "navigate") {
-        return;
-      }
 
-      const color = displayMode === "bikes" ? "#c81e00" : "#1e64c8";
-
+      // Navigate shows small neutral dots so stations stay hoverable without crowding the pins.
       predictionData.stations.forEach((station) => {
-        const availability = getAvailability(station, selectedIndex, displayMode);
-        const radius = availability * 22 + 7;
+        const info = stationInfoFromForecast(station);
+        const style =
+          view === "navigate"
+            ? { color: "#1c1c1a", fillColor: "#ffffff", fillOpacity: 1, radius: 5, weight: 1.5 }
+            : {
+                color: "#ffffff",
+                fillColor: seriesColors[displayMode],
+                fillOpacity: 0.72,
+                radius: getAvailability(station, selectedIndex, displayMode) * 22 + 7,
+                weight: 2,
+              };
 
-        const marker = L.circleMarker([station.lat, station.lon], {
-          className: "station-marker",
-          color: "#ffffff",
-          fillColor: color,
-          fillOpacity: 0.72,
-          opacity: 1,
-          radius,
-          weight: 2,
-        })
-          .bindPopup(
-            `<strong>${station.name}</strong><br/>${displayMode === "bikes" ? "Bike" : "Dock"} availability: ${formatPercent(
-              availability,
-            )}`,
-          )
+        L.circleMarker([station.lat, station.lon], { className: "station-marker", opacity: 1, ...style })
+          .on("mouseover", () => showStationCard(info))
+          .on("mouseout", scheduleHideCard)
+          .on("click", () => showStationCard(info))
           .addTo(markerLayerRef.current!);
-        stationMarkersRef.current.set(station.shortname, marker);
       });
     }
 
     renderMarkers();
   }, [data, isMapReady, selectedIndex, displayMode, view]);
+
+  useEffect(() => {
+    setHoveredStation(null);
+  }, [view]);
+
+  // The hover card is pinned to a map coordinate, so re-render it as the map moves.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!hoveredStation || !map) {
+      return;
+    }
+    const update = () => setMapTick((tick) => tick + 1);
+    map.on("move zoom", update);
+    return () => {
+      map.off("move zoom", update);
+    };
+  }, [hoveredStation]);
+
+  useEffect(() => {
+    if (!chartStation) {
+      return;
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setChartStation(null);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [chartStation]);
 
   // Routes are only valid for the pins and time they were planned with.
   useEffect(() => {
@@ -469,22 +572,25 @@ export default function Home() {
       });
 
       const route = routes[selectedRoute];
-      [route?.pickup, route?.dropoff].forEach((station, index) => {
+      [route?.pickup, route?.dropoff].forEach((station) => {
         if (!station) {
           return;
         }
-        const detail =
-          index === 0
-            ? `${station.bikesNow} bikes now (${station.ebikesNow} e-bikes), ~${station.expectedAtArrival} on arrival`
-            : `${station.docksNow} docks now, ~${station.expectedAtArrival} on arrival`;
+        const forecast = data?.stations.find((candidate) => candidate.shortname === station.shortname);
+        const info: StationInfo = forecast
+          ? stationInfoFromForecast(forecast, station.ebikesNow)
+          : { ...station, bikes: station.bikesNow, docks: station.docksNow, ebikes: station.ebikesNow, forecast: null };
         L.circleMarker([station.lat, station.lon], {
+          className: "station-marker",
           color: "#ffffff",
           fillColor: legColors.bike,
           fillOpacity: 1,
           radius: 8,
           weight: 2,
         })
-          .bindPopup(`<strong>${station.name}</strong><br/>${detail}`)
+          .on("mouseover", () => showStationCard(info))
+          .on("mouseout", scheduleHideCard)
+          .on("click", () => showStationCard(info))
           .addTo(layer);
       });
 
@@ -508,11 +614,15 @@ export default function Home() {
     }
 
     renderRoute();
-  }, [isMapReady, view, pins, routeData, selectedRoute]);
+  }, [isMapReady, view, pins, routeData, selectedRoute, data]);
 
   function focusStation(station: StationPrediction) {
-    mapRef.current?.flyTo([station.lat, station.lon], 17, { duration: 0.6 });
-    stationMarkersRef.current.get(station.shortname)?.openPopup();
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    map.once("moveend", () => showStationCard(stationInfoFromForecast(station)));
+    map.flyTo([station.lat, station.lon], 17, { duration: 0.6 });
   }
 
   const navigateHint = !pins.origin
@@ -522,6 +632,11 @@ export default function Home() {
       : routeData
         ? "Click the map to start a new trip."
         : "Pick a departure time, then generate routes.";
+
+  const cardPoint = hoveredStation && mapRef.current
+    ? mapRef.current.latLngToContainerPoint([hoveredStation.lat, hoveredStation.lon])
+    : null;
+  const chartSeries = chartStation?.forecast ? forecastSeries(chartStation, chartMode) : null;
 
   const maxDepartValue = nowValue ? toNyInputValue(new Date(Date.now() + maxDepartAheadMs)) : "";
 
@@ -757,6 +872,94 @@ export default function Home() {
           </>
         )}
       </aside>
+
+      {hoveredStation && cardPoint ? (
+        <div
+          className={`station-card${cardPoint.y < 120 ? " below" : ""}`}
+          onMouseEnter={cancelHideCard}
+          onMouseLeave={scheduleHideCard}
+          style={{ left: cardPoint.x, top: cardPoint.y }}
+        >
+          <button
+            className="station-card-button"
+            disabled={!hoveredStation.forecast}
+            onClick={() => openChart(hoveredStation)}
+            type="button"
+          >
+            <span className="station-card-text">
+              <strong>{hoveredStation.name}</strong>
+              <span className="station-card-counts">
+                {hoveredStation.bikes ?? "–"} bikes · {hoveredStation.docks ?? "–"} open docks
+                {hoveredStation.ebikes ? ` · ${hoveredStation.ebikes} e-bikes` : ""}
+              </span>
+              <span className="station-card-note">
+                {hoveredStation.forecast ? "7-day forecast" : "No forecast for this station"}
+              </span>
+            </span>
+            {hoveredStation.forecast ? (
+              <svg aria-hidden="true" className="chevron" height="16" viewBox="0 0 16 16" width="16">
+                <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+              </svg>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
+
+      {chartStation && chartSeries ? (
+        <div className="chart-backdrop" onClick={() => setChartStation(null)}>
+          <div
+            aria-labelledby="chart-title"
+            aria-modal="true"
+            className="chart-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="chart-header">
+              <div>
+                <h2 id="chart-title">{chartStation.name}</h2>
+                <span className="chart-subtitle">
+                  #{chartStation.shortname} · now {chartStation.bikes ?? "–"} bikes, {chartStation.docks ?? "–"} open docks
+                </span>
+              </div>
+              <button aria-label="Close" className="icon-button" onClick={() => setChartStation(null)} type="button">
+                <svg aria-hidden="true" height="16" viewBox="0 0 16 16" width="16">
+                  <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+                </svg>
+              </button>
+            </header>
+
+            <div className="chart-controls">
+              <span className="label">
+                Predicted {chartMode === "bikes" ? "bikes available" : "open docks"}, next 7 days
+              </span>
+              <div className="mode-toggle" aria-label="Chart series">
+                <button className={chartMode === "bikes" ? "active" : ""} onClick={() => setChartMode("bikes")} type="button">
+                  Bikes
+                </button>
+                <button className={chartMode === "docks" ? "active" : ""} onClick={() => setChartMode("docks")} type="button">
+                  Docks
+                </button>
+              </div>
+            </div>
+
+            <StationForecastChart
+              color={seriesColors[chartMode]}
+              formatTick={chartSeries.formatTick}
+              formatValue={chartSeries.formatValue}
+              markerTime={view === "forecast" && selectedTimestamp ? Date.parse(selectedTimestamp) : null}
+              max={chartSeries.max}
+              points={chartSeries.points}
+            />
+
+            <p className="chart-note">
+              {chartSeries.capacity > 0
+                ? `Counts assume the ${chartSeries.capacity} docks in service now.`
+                : "No live dock count, so values are percentages of the station."}
+              {view === "forecast" ? " The vertical line marks the hour selected on the slider." : ""}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
