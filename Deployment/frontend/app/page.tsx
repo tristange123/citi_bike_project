@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FitBoundsOptions, LayerGroup, Map as LeafletMap } from "leaflet";
+import { RouteCard, type RouteOption } from "./route-card";
 import { StationForecastChart } from "./station-forecast-chart";
 
 type DisplayMode = "bikes" | "docks";
@@ -30,43 +31,6 @@ type PredictionResponse = {
   forecastStart: string;
   forecastEnd: string;
   stations: StationPrediction[];
-};
-
-type RoutePoint = {
-  name: string;
-  lat: number;
-  lon: number;
-};
-
-type RouteStation = RoutePoint & {
-  shortname: string;
-  modeled: boolean;
-  bikesNow: number;
-  ebikesNow: number;
-  docksNow: number;
-  expectedAtArrival: number;
-};
-
-type RouteLeg = {
-  mode: "walk" | "bike";
-  start: RoutePoint;
-  end: RoutePoint;
-  meters: number;
-  seconds: number;
-  geometry: LatLng[];
-  estimated: boolean;
-};
-
-type RouteOption = {
-  label: string;
-  totalSeconds: number;
-  expectedSeconds: number;
-  reliability: number;
-  departAt: string;
-  arriveAt: string;
-  legs: RouteLeg[];
-  pickup: RouteStation | null;
-  dropoff: RouteStation | null;
 };
 
 type RouteResponse = {
@@ -127,14 +91,6 @@ function formatDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function formatClock(value: string) {
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
-}
-
-function formatMinutes(seconds: number) {
-  return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
 function formatPercent(value: number) {
@@ -734,38 +690,13 @@ export default function Home() {
             {routeData ? (
               <div className="route-list">
                 {routeData.routes.map((route, index) => (
-                  <button
-                    className={`route-card${index === selectedRoute ? " selected" : ""}`}
+                  <RouteCard
+                    isRecommended={index === routeData.recommendedIndex}
+                    isSelected={index === selectedRoute}
                     key={`${route.label}-${index}`}
-                    onClick={() => setSelectedRoute(index)}
-                    type="button"
-                  >
-                    <div className="route-card-header">
-                      <span className="route-label">
-                        {route.label}
-                        {index === routeData.recommendedIndex ? <em>recommended</em> : null}
-                      </span>
-                      <strong>{formatMinutes(route.totalSeconds)}</strong>
-                    </div>
-                    <span className="route-meta">
-                      {formatClock(route.departAt)} → {formatClock(route.arriveAt)} ·{" "}
-                      {route.pickup ? `${formatPercent(route.reliability)} chance bike + dock` : "no bike needed"}
-                    </span>
-                    <ol className="route-legs">
-                      {route.legs.map((leg, legIndex) => (
-                        <li className={leg.mode} key={legIndex}>
-                          {leg.mode === "walk" ? "Walk" : "Ride"} {formatMinutes(leg.seconds)} to {leg.end.name}
-                        </li>
-                      ))}
-                    </ol>
-                    {route.pickup && route.dropoff ? (
-                      <span className="route-meta">
-                        {route.pickup.bikesNow} bikes at pickup now · ~{Math.floor(route.dropoff.expectedAtArrival)} docks
-                        free at drop-off on arrival
-                        {route.dropoff.modeled ? " (forecast)" : ""}
-                      </span>
-                    ) : null}
-                  </button>
+                    onSelect={() => setSelectedRoute(index)}
+                    route={route}
+                  />
                 ))}
                 {routeData.routes[selectedRoute]?.legs.some((leg) => leg.estimated) ? (
                   <p className="route-message">

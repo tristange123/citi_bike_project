@@ -13,7 +13,6 @@
   --accent: #1e64c8;
   --shadow: 0 1px 2px rgba(20, 20, 18, 0.06), 0 8px 24px rgba(20, 20, 18, 0.1);
   --sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 * {
@@ -32,6 +31,8 @@ body {
   background: var(--background);
   color: var(--text);
   font-family: var(--sans);
+  /* Fixed-width digits keep times and counts aligned without a monospace face. */
+  font-variant-numeric: tabular-nums;
   font-size: 14px;
   line-height: 1.45;
 }
@@ -117,7 +118,6 @@ h1 {
 }
 
 .panel-section strong {
-  font-family: var(--mono);
   font-size: 13px;
   font-weight: 500;
 }
@@ -258,7 +258,6 @@ h1 {
 
 .time-row input {
   flex: 1;
-  font-family: var(--mono);
   font-size: 13px;
 }
 
@@ -337,45 +336,67 @@ h1 {
 .route-list {
   display: flex;
   flex-direction: column;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 4px;
   margin-top: 12px;
 }
 
 .route-card {
-  background: none;
-  border: 0;
-  border-left: 2px solid transparent;
-  border-top: 1px solid var(--border);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   color: var(--text);
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-left: -18px;
-  padding: 12px 18px 12px 16px;
+  gap: 12px;
+  padding: 12px;
   text-align: left;
-  width: calc(100% + 36px);
+  transition: border-color 120ms ease;
 }
 
 .route-card:hover {
-  background: var(--hover);
+  border-color: #c9c6bf;
 }
 
 .route-card.selected {
-  background: var(--hover);
-  border-left-color: var(--accent);
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--text);
 }
 
-.route-card-header {
-  align-items: baseline;
+.route-summary {
+  align-items: center;
   display: flex;
-  justify-content: space-between;
+  gap: 12px;
 }
 
-.route-card-header strong {
-  font-family: var(--mono);
-  font-size: 15px;
+.chance-ring {
+  color: var(--muted);
+  flex: none;
+}
+
+.chance-ring-track {
+  stroke: #ece9e3;
+}
+
+.chance-ring-label {
+  fill: var(--text);
+  font-size: 12px;
   font-weight: 500;
+}
+
+.route-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.route-title-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
 }
 
 .route-label {
@@ -383,40 +404,149 @@ h1 {
   text-transform: capitalize;
 }
 
-.route-label em {
-  color: var(--accent);
-  font-size: 12px;
-  font-style: normal;
+.route-badge {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 500;
-  margin-left: 8px;
-  text-transform: none;
+  padding: 0 5px;
 }
 
-.route-meta {
+.route-card.selected .route-badge {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.route-times {
+  font-size: 12px;
+}
+
+.route-chance {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.chance-dot {
+  border-radius: 50%;
+  flex: none;
+  height: 8px;
+  width: 8px;
+}
+
+.route-duration {
+  align-items: baseline;
+  display: flex;
+  flex: none;
+  gap: 3px;
+}
+
+.route-duration strong {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.route-duration span {
   color: var(--muted);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
 
-.route-legs {
-  color: var(--text);
+/* One segment per leg, sized by its share of the trip time. */
+.route-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+
+.route-bar span {
+  border-radius: 3px;
+  min-width: 6px;
+}
+
+.route-bar .walk {
+  background: repeating-linear-gradient(90deg, #b9b6ae 0 4px, transparent 4px 6px);
+}
+
+.route-bar .bike {
+  background: var(--accent);
+}
+
+.route-steps {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+  list-style: none;
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
 }
 
-.route-legs li {
+.route-steps li {
+  align-items: center;
+  display: flex;
   font-size: 13px;
+  gap: 8px;
 }
 
-.route-legs li::marker {
-  color: var(--faint);
+.step-icon {
+  align-items: center;
+  border-radius: 4px;
+  display: flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
 }
 
-.route-legs li.bike::marker {
+.route-steps .walk .step-icon {
+  background: #f0eee9;
+  color: var(--muted);
+}
+
+.route-steps .bike .step-icon {
+  background: #e6eefa;
   color: var(--accent);
+}
+
+.step-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-time {
+  color: var(--muted);
+  flex: none;
+  font-size: 12px;
+}
+
+.route-stations {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  padding-top: 10px;
+}
+
+.route-stations div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.route-stations strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.route-stations span:not(.label) {
+  color: var(--faint);
+  font-size: 12px;
 }
 
 /* Station table */
@@ -451,7 +581,6 @@ th {
 
 th:not(:first-child),
 td:not(:first-child) {
-  font-family: var(--mono);
   font-size: 13px;
   padding-left: 0;
   text-align: right;
@@ -468,7 +597,6 @@ td strong {
 
 td span {
   color: var(--faint);
-  font-family: var(--mono);
   font-size: 11px;
   margin-top: 1px;
 }
@@ -554,7 +682,6 @@ td span {
 }
 
 .station-card-counts {
-  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -612,7 +739,6 @@ td span {
 
 .chart-subtitle {
   color: var(--muted);
-  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -684,7 +810,6 @@ td span {
 
 .chart-axis {
   fill: var(--muted);
-  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -711,7 +836,6 @@ td span {
 }
 
 .chart-tooltip strong {
-  font-family: var(--mono);
   font-size: 13px;
   font-weight: 500;
 }
