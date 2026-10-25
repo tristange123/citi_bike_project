@@ -185,6 +185,9 @@ export default function Home() {
   // The map click handler is registered once, so it reads the current view through a ref.
   const viewRef = useRef<View>(view);
   viewRef.current = view;
+  // Once routes are planned (or being planned) the pins stay put until "Redraw pins".
+  const pinsLockedRef = useRef(false);
+  pinsLockedRef.current = routeData !== null || isRouteLoading;
 
   useEffect(() => {
     let isCancelled = false;
@@ -298,7 +301,9 @@ export default function Home() {
 
       const lesBounds = L.latLngBounds(lesSouthWest, lesNorthEast);
       const map = L.map(mapContainerRef.current, {
-        maxBounds: lesBounds.pad(0.15),
+        // Panning room well past the pin area: if the bounds are barely wider than the screen,
+        // Leaflet locks the map and dragging stops working at moderate zoom.
+        maxBounds: lesBounds.pad(0.75),
         maxBoundsViscosity: 1,
         minZoom: 14,
         scrollWheelZoom: true,
@@ -339,7 +344,7 @@ export default function Home() {
         if (!target?.classList?.contains("station-marker")) {
           setHoveredStation(null);
         }
-        if (viewRef.current !== "navigate" || !lesBounds.contains(event.latlng)) {
+        if (viewRef.current !== "navigate" || pinsLockedRef.current || !lesBounds.contains(event.latlng)) {
           return;
         }
         const point: LatLng = [event.latlng.lat, event.latlng.lng];
@@ -392,8 +397,9 @@ export default function Home() {
         const info = stationInfoFromForecast(station);
         const style =
           view === "navigate"
-            ? { color: "#1c1c1a", fillColor: "#ffffff", fillOpacity: 1, radius: 5, weight: 1.5 }
+            ? { className: "station-marker station-dot", color: "#a19e97", fillColor: "#ffffff", fillOpacity: 1, radius: 5, weight: 2 }
             : {
+                className: "station-marker",
                 color: "#ffffff",
                 fillColor: seriesColors[displayMode],
                 fillOpacity: 0.72,
@@ -401,7 +407,7 @@ export default function Home() {
                 weight: 2,
               };
 
-        L.circleMarker([station.lat, station.lon], { className: "station-marker", opacity: 1, ...style })
+        L.circleMarker([station.lat, station.lon], { opacity: 1, ...style })
           .on("mouseover", () => showStationCard(info))
           .on("mouseout", scheduleHideCard)
           .on("click", () => showStationCard(info))
@@ -586,7 +592,7 @@ export default function Home() {
     : !pins.destination
       ? "Click the map again to drop your destination."
       : routeData
-        ? "Click the map to start a new trip."
+        ? "Redraw pins to plan a different trip."
         : "Pick a departure time, then generate routes.";
 
   const cardPoint = hoveredStation && mapRef.current
@@ -672,14 +678,24 @@ export default function Home() {
               </div>
             </section>
 
-            <button
-              className="generate-button"
-              disabled={!pins.origin || !pins.destination || isRouteLoading}
-              onClick={generateRoutes}
-              type="button"
-            >
-              {isRouteLoading ? "Planning routes..." : "Generate routes"}
-            </button>
+            {routeData ? (
+              <button
+                className="generate-button secondary"
+                onClick={() => setPins({ origin: null, destination: null })}
+                type="button"
+              >
+                Redraw pins
+              </button>
+            ) : (
+              <button
+                className="generate-button"
+                disabled={!pins.origin || !pins.destination || isRouteLoading}
+                onClick={generateRoutes}
+                type="button"
+              >
+                {isRouteLoading ? "Planning routes..." : "Generate routes"}
+              </button>
+            )}
 
             <p className="route-message">{navigateHint}</p>
             {isWakingServer ? (

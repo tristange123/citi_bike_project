@@ -303,6 +303,16 @@ h1 {
   background: #000000;
 }
 
+.generate-button.secondary {
+  background: var(--card);
+  border: 1px solid var(--text);
+  color: var(--text);
+}
+
+.generate-button.secondary:hover {
+  background: var(--hover);
+}
+
 .generate-button:disabled {
   background: #d8d6d1;
   color: #8a8883;
@@ -613,6 +623,16 @@ td span {
 
 .station-marker {
   cursor: pointer;
+}
+
+/* Navigate's station dots: a soft grey ring, lifted off the map by a faint shadow. */
+.station-dot {
+  filter: drop-shadow(0 1px 1.5px rgba(28, 28, 26, 0.2));
+  transition: stroke 120ms ease;
+}
+
+.station-dot:hover {
+  stroke: var(--text);
 }
 
 .leaflet-container {
