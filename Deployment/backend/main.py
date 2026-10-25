@@ -25,7 +25,8 @@ from .planner import plan_routes
 
 
 # Rough NYC bounding box; pins outside it have no Citi Bike service.
-SERVICE_AREA = {"lat": (40.45, 40.95), "lon": (-74.30, -73.65)}
+# Lower Manhattan up to ~20th St, padded ~150 m past the frontend's pin bounds.
+SERVICE_AREA = {"lat": (40.6986, 40.7424), "lon": (-74.0218, -73.9682)}
 
 
 class PredictionPoint(BaseModel):
@@ -202,7 +203,7 @@ def parse_point(value: str, field: str) -> tuple[float, float]:
 
     (lat_min, lat_max), (lon_min, lon_max) = SERVICE_AREA["lat"], SERVICE_AREA["lon"]
     if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
-        raise HTTPException(status_code=422, detail=f"'{field}' is outside the Citi Bike service area")
+        raise HTTPException(status_code=422, detail=f"'{field}' is outside the Lower Manhattan service area")
     return lat, lon
 
 
