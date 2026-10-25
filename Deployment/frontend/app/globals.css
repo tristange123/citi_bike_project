@@ -625,14 +625,56 @@ td span {
   cursor: pointer;
 }
 
-/* Navigate's station dots: a soft grey ring, lifted off the map by a faint shadow. */
-.station-dot {
-  filter: drop-shadow(0 1px 1.5px rgba(28, 28, 26, 0.2));
-  transition: stroke 120ms ease;
+/* Station markers are zero-size anchors with the visible circle centered on the point. */
+.station-marker > span {
+  border-radius: 50%;
+  cursor: pointer;
+  left: 0;
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, -50%);
 }
 
-.station-dot:hover {
-  stroke: var(--text);
+/* Navigate: a soft grey ring, lifted off the map by a faint shadow. */
+.station-dot > span {
+  background: #ffffff;
+  border: 2px solid #a19e97;
+  box-shadow: 0 1px 2px rgba(28, 28, 26, 0.25);
+  height: 12px;
+  transition: border-color 120ms ease;
+  width: 12px;
+}
+
+.station-dot > span:hover {
+  border-color: var(--text);
+}
+
+/* Forecast: bubbles sized by availability and zoom, easing between sizes. */
+.station-bubble > span {
+  animation: bubble-in 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  background: var(--fill, transparent);
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(28, 28, 26, 0.2);
+  height: calc(var(--diameter, 14px) * var(--zoom-scale, 1));
+  transition:
+    width 350ms ease,
+    height 350ms ease,
+    background-color 350ms ease;
+  width: calc(var(--diameter, 14px) * var(--zoom-scale, 1));
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .station-bubble > span {
+    animation: none;
+    transition: none;
+  }
 }
 
 .leaflet-container {

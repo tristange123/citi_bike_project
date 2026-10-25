@@ -69,6 +69,12 @@ const lesNorthEast: LatLng = [40.741, -73.97];
 
 const legColors ={ walk: "#64748b", bike: "#1e64c8" };
 const seriesColors: Record<DisplayMode, string> = { bikes: "#c81e00", docks: "#1e64c8" };
+const bubbleFills: Record<DisplayMode, string> = { bikes: "rgba(200, 30, 0, 0.72)", docks: "rgba(30, 100, 200, 0.72)" };
+
+// Forecast bubbles grow gently with zoom (about 1.4x per level), within limits.
+function bubbleZoomScale(zoom: number) {
+  return Math.min(1.8, Math.max(0.6, 2 ** ((zoom - 15) / 2)));
+}
 const cardHideDelayMs = 200;
 const retryDelaysMs = [3000, 6000, 12000, 20000, 30000];
 const maxDepartAheadMs = 7 * 24 * 60 * 60 * 1000 - 10 * 60 * 1000;
@@ -179,6 +185,9 @@ export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markerLayerRef = useRef<LayerGroup | null>(null);
+  // Each station's marker element, so slider and mode changes resize them in place instead of rebuilding.
+  const stationElementsRef = useRef(new Map<string, HTMLElement>());
+  const [markersVersion, setMarkersVersion] = useState(0);
   const routeLayerRef = useRef<LayerGroup | null>(null);
   const routeAbortRef = useRef<AbortController | null>(null);
   const hideCardTimerRef = useRef<number | null>(null);
@@ -312,6 +321,14 @@ export default function Home() {
       map.fitBounds(lesBounds, panelPadding());
       L.control.zoom({ position: "bottomright" }).addTo(map);
 
+      // Set the bubble scale as the zoom animation starts, so CSS eases the resize alongside it.
+      const container = mapContainerRef.current;
+      const setZoomScale = (zoom: number) =>
+        container.style.setProperty("--zoom-scale", bubbleZoomScale(zoom).toFixed(3));
+      setZoomScale(map.getZoom());
+      map.on("zoomanim", (event) => setZoomScale(event.zoom));
+      map.on("zoomend", () => setZoomScale(map.getZoom()));
+
       // CARTO serves an "API key required" placeholder without a key, so fall back to plain OSM tiles.
       if (cartoApiKey) {
         L.tileLayer(
@@ -341,7 +358,7 @@ export default function Home() {
       // First click drops the start pin, second the destination; a third starts over.
       map.on("click", (event) => {
         const target = event.originalEvent.target as Element | null;
-        if (!target?.classList?.contains("station-marker")) {
+        if (!target?.closest?.(".station-marker")) {
           setHoveredStation(null);
         }
         if (viewRef.current !== "navigate" || pinsLockedRef.current || !lesBounds.contains(event.latlng)) {
@@ -391,32 +408,50 @@ export default function Home() {
       }
 
       markerLayerRef.current.clearLayers();
+      stationElementsRef.current.clear();
 
-      // Navigate shows small neutral dots so stations stay hoverable without crowding the pins.
+      // HTML markers rather than SVG circles: Leaflet moves them during zoom without stretching them,
+      // and CSS can ease their size. Navigate shows small neutral dots; Forecast shows sized bubbles.
+      const icon = L.divIcon({
+        className: `station-marker ${view === "navigate" ? "station-dot" : "station-bubble"}`,
+        html: "<span></span>",
+        iconSize: [0, 0],
+      });
+
       predictionData.stations.forEach((station) => {
         const info = stationInfoFromForecast(station);
-        const style =
-          view === "navigate"
-            ? { className: "station-marker station-dot", color: "#a19e97", fillColor: "#ffffff", fillOpacity: 1, radius: 5, weight: 2 }
-            : {
-                className: "station-marker",
-                color: "#ffffff",
-                fillColor: seriesColors[displayMode],
-                fillOpacity: 0.72,
-                radius: getAvailability(station, selectedIndex, displayMode) * 22 + 7,
-                weight: 2,
-              };
-
-        L.circleMarker([station.lat, station.lon], { opacity: 1, ...style })
+        // Clicks still reach the map so a pin can be dropped on a station.
+        const marker = L.marker([station.lat, station.lon], { bubblingMouseEvents: true, icon, keyboard: false })
           .on("mouseover", () => showStationCard(info))
           .on("mouseout", scheduleHideCard)
           .on("click", () => showStationCard(info))
           .addTo(markerLayerRef.current!);
+        const element = marker.getElement();
+        if (element) {
+          stationElementsRef.current.set(station.shortname, element);
+        }
       });
+      setMarkersVersion((version) => version + 1);
     }
 
     renderMarkers();
-  }, [data, isMapReady, selectedIndex, displayMode, view]);
+  }, [data, isMapReady, view]);
+
+  // Resize and recolor the existing bubbles; their CSS transitions animate the change.
+  useEffect(() => {
+    if (!data || view !== "forecast") {
+      return;
+    }
+    data.stations.forEach((station) => {
+      const element = stationElementsRef.current.get(station.shortname);
+      if (!element) {
+        return;
+      }
+      const diameter = 2 * (getAvailability(station, selectedIndex, displayMode) * 22 + 7);
+      element.style.setProperty("--diameter", `${diameter}px`);
+      element.style.setProperty("--fill", bubbleFills[displayMode]);
+    });
+  }, [data, view, selectedIndex, displayMode, markersVersion]);
 
   useEffect(() => {
     setHoveredStation(null);
